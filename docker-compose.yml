@@ -1,0 +1,113 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: pipelinepractice-minio-1
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=admin12345
+      - TZ=Asia/Seoul
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # 웹 콘솔
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/pg:/var/lib/postgresql/data"
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/postgres/init:/docker-entrypoint-initdb.d"
+    restart: unless-stopped
+
+  # Spark Master (공식 이미지)
+  spark:
+    container_name: spark-master
+    image: apache/spark:3.5.1-scala2.12-java17-python3-ubuntu
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    command: ["/opt/spark/bin/spark-class","org.apache.spark.deploy.master.Master","--ip","spark-master","--port","7077","--webui-port","8080"]
+    ports:
+      - "7077:7077"   # 클러스터 포트
+      - "18080:8080"   # Spark Master UI
+    volumes:
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/data:/data"
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/spark/app:/opt/spark/app"
+    restart: unless-stopped
+
+  # Spark Worker
+  spark-worker:
+    image: apache/spark:3.5.1-scala2.12-java17-python3-ubuntu
+    depends_on:
+      - spark
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    command: ["/opt/spark/bin/spark-class","org.apache.spark.deploy.worker.Worker","spark://spark-master:7077","--webui-port","18080"]
+    # (worker UI 포트는 호스트에 굳이 노출하지 않음)
+    volumes:
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/data:/data"
+    restart: unless-stopped
+
+  zeppelin:
+    image: apache/zeppelin:0.11.2
+    ports:
+      - "8081:8080"
+    depends_on:
+      - spark
+      - postgres
+    volumes:
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/data:/data"
+    restart: unless-stopped
+
+  airflow:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile   # ← 새 Dockerfile 사용
+    user: "50000:0"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      TZ: Asia/Seoul
+      # (이미지에서 pip 설치했으므로 굳이 _PIP_ADDITIONAL_REQUIREMENTS는 없어도 됨)
+    command: >
+      bash -lc "airflow db init &&
+      airflow users create --username admin --firstname a --lastname a --role Admin --email a@a.com --password admin || true &&
+      airflow webserver & airflow scheduler"
+    ports:
+      - "8082:8080"
+    depends_on:
+      - spark
+      - postgres
+      - minio
+    volumes:
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/airflow/dags:/opt/airflow/dags"
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/spark/app:/opt/spark/app"   # ← DAG에서 이 경로 사용
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/data:/data"
+    restart: unless-stopped
+
+
+  web:
+    build: ./web
+    ports:
+      - "3000:3000"
+    environment:
+      DATA_ROOT: ${DATA_ROOT}
+      USE_MINIO: ${USE_MINIO}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      
+    volumes:
+      - "C:/Users/PC/Desktop/projects/pipelinepractice/data:/data"
+    depends_on:
+      - minio
+
+volumes:
+  minio_data: {} 

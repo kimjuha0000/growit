@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Learning Pipeline Hub</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #05060f;
+      --card: rgba(16, 18, 34, 0.85);
+      --card-border: rgba(255, 255, 255, 0.12);
+      --text: #f4f6ff;
+      --muted: #9ea7c9;
+      --accent: #7c6cff;
+      font-family: 'Pretendard', 'Spoqa Han Sans Neo', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% 20%, rgba(124,108,255,0.35), transparent 45%),
+        radial-gradient(circle at 80% 0%, rgba(16,181,134,0.35), transparent 40%), var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 32px 16px 80px;
+    }
+
+    .shell {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      padding: 32px;
+      border-radius: 32px;
+      background: linear-gradient(135deg, rgba(124,108,255,0.35), rgba(13,110,253,0.25));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
+      margin-bottom: 28px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 46px);
+    }
+
+    .hero p {
+      color: var(--muted);
+      margin: 14px 0 0;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .pill {
+      padding: 8px 16px;
+      border-radius: 99px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      font-size: 14px;
+    }
+
+    section {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 26px;
+      margin-bottom: 24px;
+      box-shadow: 0 20px 35px rgba(0,0,0,0.25);
+      backdrop-filter: blur(22px);
+    }
+
+    h2 {
+      margin-top: 0;
+      font-size: 24px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+    }
+
+    button {
+      padding: 12px 20px;
+      border-radius: 14px;
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 10px 20px rgba(124,108,255,0.35);
+    }
+
+    button:hover:not(:disabled) { transform: translateY(-1px); }
+    button:disabled { background: rgba(255,255,255,0.2); cursor: not-allowed; }
+
+    .status {
+      min-height: 22px;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    .status.ok { color: #4ade80; }
+    .status.err { color: #f87171; }
+    .hidden { display: none; }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+
+    .info-card {
+      border: 1px dashed rgba(255,255,255,0.2);
+      border-radius: 18px;
+      padding: 18px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .info-card strong {
+      font-size: 14px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .info-card p {
+      margin: 6px 0 0;
+      font-size: 16px;
+      color: var(--text);
+    }
+
+    .category-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .category-card {
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .category-card h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .category-card p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .category-card a {
+      color: #93c5fd;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .courses {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 18px;
+    }
+
+    .course-card {
+      padding: 18px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .course-card h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .course-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .course-card a {
+      margin-top: auto;
+      color: #38bdf8;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    code {
+      background: rgba(255,255,255,0.08);
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
+    @media (max-width: 600px) {
+      section { padding: 20px; }
+      .hero { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <h1>Learning Pipeline Hub</h1>
+      <p>데이터 엔지니어링부터 디자인, DevOps까지 10개의 트랙·1,000개의 큐레이션 강의를 한 번에 탐색하세요. 로그인과 동시에 선택 내역이 Airflow → Spark → Delta → Postgres로 흐르며 학습 인사이트를 남깁니다.</p>
+      <div class="pill-row">
+        <span class="pill">10개 카테고리</span>
+        <span class="pill">1000개 가상 강의 링크</span>
+        <span class="pill">MinIO Bronze 로그 적재</span>
+        <span class="pill">LLM/멀티모달 추천 실험용</span>
+      </div>
+    </header>
+
+    <section id="loginSection">
+      <h2>1. 로그인</h2>
+      <div class="split">
+        <form id="loginForm">
+          <label for="username">아이디</label>
+          <input id="username" name="username" placeholder="예: datafan" required />
+          <label for="password">비밀번호</label>
+          <input id="password" type="password" name="password" placeholder="sample password" required />
+          <button type="submit">파이프라인 시작</button>
+          <div id="loginStatus" class="status"></div>
+        </form>
+        <div class="info-card">
+          <strong>샘플 계정</strong>
+          <p><code>datafan/pass1234</code></p>
+          <p><code>growthhacker/grow2025</code></p>
+          <p><code>juniordev/devstart</code></p>
+          <p>로그인 이벤트는 Bronze Storage에 JSONL로 적재되며 필요 시 MinIO에 업로드됩니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="categorySection" class="hidden">
+      <h2>2. 카테고리 선택</h2>
+      <p id="welcomeText"></p>
+      <label for="categorySelect">관심 분야</label>
+      <select id="categorySelect"></select>
+      <button id="recommendBtn">추천 강의 보기</button>
+      <div id="categoryStatus" class="status"></div>
+      <div id="categoryPreview" class="category-grid"></div>
+    </section>
+
+    <section id="resultSection" class="hidden">
+      <h2>3. 추천 강의</h2>
+      <div id="selectedCategory"></div>
+      <div id="courses" class="courses"></div>
+    </section>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

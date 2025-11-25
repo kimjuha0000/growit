@@ -1,0 +1,20 @@
+[
+  {
+    "username": "datafan",
+    "password": "pass1234",
+    "full_name": "김데이터",
+    "interests": ["data-engineering", "ai-labs"]
+  },
+  {
+    "username": "growthhacker",
+    "password": "grow2025",
+    "full_name": "박그로스",
+    "interests": ["marketing", "product-design"]
+  },
+  {
+    "username": "juniordev",
+    "password": "devstart",
+    "full_name": "이루트",
+    "interests": ["backend", "data-engineering"]
+  }
+]

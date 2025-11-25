@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+pendulum
+filelock
+boto3
