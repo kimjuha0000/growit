@@ -5,6 +5,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py ./app.py
+COPY users.json ./users.json
 COPY static ./static
 
 ENV PYTHONUNBUFFERED=1

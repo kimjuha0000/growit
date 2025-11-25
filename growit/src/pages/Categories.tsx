@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -11,8 +11,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { CategorySummary, RecommendationResponse } from "@/types/pipeline";
+import type { CategorySummary } from "@/types/pipeline";
 import { ArrowRight, ActivitySquare, Database, ServerCog, Share2 } from "lucide-react";
+import YoutubeVideoCard from "@/components/YoutubeVideoCard";
+import { youtubeCategories, getVideosByCategory, YoutubeVideo } from "@/lib/youtube-data";
+import { trackEvent } from "@/lib/analytics";
 
 const pipelineSteps = [
   {
@@ -41,9 +44,16 @@ const Categories = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [params] = useSearchParams();
 
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(params.get("category"));
+  const [recommendation, setRecommendation] = useState<{
+    id: string;
+    name: string;
+    description?: string;
+    icon?: string;
+    videos: YoutubeVideo[];
+  } | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["categories"],
@@ -51,6 +61,35 @@ const Categories = () => {
   });
 
   const categories = useMemo<CategorySummary[]>(() => data?.items ?? [], [data]);
+
+  const enrichedCategories = useMemo(() => {
+    if (!categories.length) {
+      return youtubeCategories.map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+        description: cat.description,
+        icon: cat.icon,
+        accent: cat.accent,
+        courseCount: getVideosByCategory(cat.id).length,
+      }));
+    }
+    return categories.map((cat) => {
+      const fallback = youtubeCategories.find((y) => y.id === cat.id);
+      return {
+        ...cat,
+        icon: fallback?.icon ?? cat.icon,
+        description: cat.description ?? fallback?.description,
+        accent: cat.accent ?? fallback?.accent,
+        courseCount: getVideosByCategory(cat.id).length,
+      };
+    });
+  }, [categories]);
+
+  useEffect(() => {
+    if (!selectedCategory && enrichedCategories.length) {
+      setSelectedCategory(enrichedCategories[0].id);
+    }
+  }, [selectedCategory, enrichedCategories]);
 
   const mutation = useMutation({
     mutationFn: (categoryId: string) => {
@@ -63,10 +102,22 @@ const Categories = () => {
       });
     },
     onSuccess: (payload) => {
-      setRecommendation(payload);
+      const videos = getVideosByCategory(payload.category.id);
+      setRecommendation({
+        id: payload.category.id,
+        name: payload.category.name,
+        description: payload.category.description ?? undefined,
+        icon: payload.category.icon ?? undefined,
+        videos,
+      });
+      trackEvent(
+        "category_recommendation",
+        { categoryId: payload.category.id, videoCount: videos.length },
+        user?.username,
+      );
       toast({
-        title: `${payload.category.name} 트랙 추천`,
-        description: `${payload.courses.length}개의 강의를 찾았습니다.`,
+        title: `${payload.category.name} 인기 유튜브 강의`,
+        description: `${videos.length}개의 영상을 불러왔습니다.`,
       });
     },
     onError: (err: Error) => {
@@ -89,6 +140,7 @@ const Categories = () => {
       return;
     }
     setSelectedCategory(categoryId);
+    trackEvent("category_select", { categoryId }, user?.username);
   };
 
   const handleRecommend = () => {
@@ -105,7 +157,7 @@ const Categories = () => {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 bg-muted/20">
+      <main className="flex-1 bg-muted/30">
         <div className="container px-4 py-10 space-y-8">
           <section className="rounded-3xl border bg-background/80 p-6 md:p-10 shadow-sm">
             <div className="flex flex-col gap-4">
@@ -162,11 +214,11 @@ const Categories = () => {
                   </div>
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {categories.map((category) => (
-                      <button
-                        key={category.id}
-                        type="button"
-                        onClick={() => handleCategorySelect(category.id)}
+                {enrichedCategories.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => handleCategorySelect(category.id)}
                         className={cn(
                           "rounded-2xl border p-4 text-left transition hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-primary",
                           selectedCategory === category.id
@@ -243,7 +295,7 @@ const Categories = () => {
               <CardHeader>
                 <CardTitle>추천 결과</CardTitle>
                 <CardDescription>
-                  추천 버튼을 누르면 선택한 트랙에서 100개의 강의 링크가 반환됩니다. 아래에는 상위 12개를 보여줍니다.
+                  추천 버튼을 누르면 선택한 트랙의 인기 유튜브 강의를 한 번에 모아서 보여줍니다.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -254,34 +306,33 @@ const Categories = () => {
                 ) : (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3 rounded-2xl border bg-primary/5 p-4">
-                      <span className="text-2xl">{recommendation.category.icon || "📘"}</span>
+                      <span className="text-2xl">{recommendation.icon || "📘"}</span>
                       <div>
                         <p className="font-semibold">
-                          {recommendation.category.name} ({recommendation.category.id})
+                          {recommendation.name} ({recommendation.id})
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {recommendation.category.description}
+                          {recommendation.description}
                         </p>
                       </div>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {recommendation.courses.slice(0, 12).map((course) => (
-                        <a
-                          key={course.url}
-                          href={course.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded-2xl border bg-background/70 p-4 transition hover:-translate-y-1 hover:border-primary/60"
-                        >
-                          <p className="font-semibold">{course.title}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {course.provider} · {course.duration} · {course.level}
-                          </p>
-                          <span className="mt-3 inline-flex items-center text-sm font-medium text-primary">
-                            바로가기
-                            <ArrowRight className="ml-1 h-4 w-4" />
-                          </span>
-                        </a>
+                      {recommendation.videos.map((video) => (
+                        <YoutubeVideoCard
+                          key={video.id}
+                          video={video}
+                          onOpen={(item) =>
+                            trackEvent(
+                              "video_open",
+                              {
+                                videoId: item.id,
+                                categoryId: recommendation.id,
+                                source: "category_recommendation",
+                              },
+                              user?.username,
+                            )
+                          }
+                        />
                       ))}
                     </div>
                   </div>

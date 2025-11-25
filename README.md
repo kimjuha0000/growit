@@ -29,7 +29,18 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
    cp .env.example .env   # 존재한다면 복사 후 MinIO/DB 정보 확인
    ```
 2. **폴더 권한 확인**  
-   `data/`, `pg/`, `tmp/`, `zeppelin/` 등은 Docker 컨테이너에서 읽고 쓸 수 있어야 합니다. Windows라면 해당 폴더의 “보안” 탭에서 `Users` 그룹에 쓰기 권한을 부여하세요.
+   `data/`, `pg/`, `tmp/`, `zeppelin/` 등은 Docker 컨테이너에서 읽고 쓸 수 있어야 합니다. Windows라면 PowerShell에서 아래 명령을 실행해 `Users` 그룹에 읽기/쓰기 권한을 부여하세요.
+   ```powershell
+   # 프로젝트 루트(C:\Users\PC\Desktop\projects\growit)에서 실행
+   mkdir data,pg,tmp -Force
+   icacls data pg tmp /grant "Users:(OI)(CI)F" /t
+   ```
+   macOS/Linux에서는 다음처럼 권한을 맞춰주면 됩니다.
+   ```bash
+   mkdir -p data pg tmp
+   sudo chown -R $USER:$USER data pg tmp
+   chmod -R 775 data pg tmp
+   ```
 3. **도커 서비스 실행**
    ```bash
    docker compose up -d --build
@@ -63,8 +74,13 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
   - `growit/dist`(혹은 하위에 또 있는 dist) 폴더를 찾으면 `/assets`로 마운트하고, SPA 라우팅을 위해 모든 비-API 요청을 index.html로 돌립니다.
   - `/api/*` 경로와 기존 `/login`, `/categories`, `/recommendations` 경로를 동시에 유지해 하위 호환성을 확보했습니다.
   - 10개의 카테고리 × 100개의 강의 URL을 생성하는 `COURSE_CATALOG`를 보관합니다.
-  - 로그인 및 추천 시 `/data/bronze/app/YYYY/MM/DD/part-YYYYMMDD-HH.jsonl` 파일에 JSONL 레코드를 추가하고, `USE_MINIO=true`라면 MinIO `logs` 버킷에 업로드합니다.
+  - 로그인, 추천뿐 아니라 프런트에서 전달하는 맞춤 이벤트(`/api/events`)도 모두 `/data/bronze/app/YYYY/MM/DD/part-YYYYMMDD-HH.jsonl`에 저장하고, `USE_MINIO=true`일 때 MinIO `logs` 버킷으로 동기화합니다. 이벤트 `metadata`에는 검색어, 영상 클릭, 카테고리 선택 시각 등 UI 측정 값이 그대로 남습니다.
 - `web/ERD.md`에서 사용자·카테고리·강의·이벤트 간 관계를 Mermaid 다이어그램으로 정리했습니다.
+
+### 이벤트 로깅 참고
+
+- 프런트는 `src/lib/analytics.ts` → `api.logEvent` → `/api/events`로 이벤트를 전송합니다. `event_type`만 지정하면 되며, `metadata` 객체에는 검색어(`search_query`), 유튜브 영상 클릭(`video_open`), 홈/카테고리 카드 선택(`home_category_click`, `category_select`) 등 모든 UI 상호작용을 자유롭게 넣을 수 있습니다.
+- 수집된 이벤트는 이후 Airflow → Spark → Delta → Postgres 파이프라인에서 `PIPELINE_EVENTS` → `mart.daily_events`로 집계되며, Zeppelin에서 바로 활용할 수 있습니다.
 
 ## 모니터링 & 분석 포인트
 

@@ -1,4 +1,4 @@
-import { Search, ShoppingCart, Menu, LogOut } from "lucide-react";
+import { Search, ShoppingCart, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -23,7 +23,7 @@ const Navbar = () => {
             <span className="text-xl font-bold text-primary-foreground">GI</span>
           </div>
           <span className="hidden text-xl font-bold text-foreground sm:inline-block">
-            GrowIt
+                GrowIt
           </span>
         </Link>
 
@@ -46,6 +46,9 @@ const Navbar = () => {
           <Link to="/categories" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
             카테고리
           </Link>
+          <Link to="/my-page" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
+            마이페이지
+          </Link>
           {user && (
             <span className="text-sm font-medium text-foreground/70">
               {user.full_name}님
@@ -57,8 +60,7 @@ const Navbar = () => {
             </Link>
           </Button>
           {user ? (
-            <Button variant="outline" className="gap-2" onClick={handleLogout}>
-              <LogOut className="h-4 w-4" />
+            <Button variant="outline" onClick={handleLogout}>
               로그아웃
             </Button>
           ) : (
@@ -91,11 +93,11 @@ const Navbar = () => {
               </div>
               <Link to="/courses" className="text-sm font-medium">강의</Link>
               <Link to="/categories" className="text-sm font-medium">카테고리</Link>
+              <Link to="/my-page" className="text-sm font-medium">마이페이지</Link>
               {user ? (
                 <div className="space-y-3 pt-4">
                   <p className="text-sm text-muted-foreground">{user.full_name}님</p>
-                  <Button variant="outline" className="w-full gap-2" onClick={handleLogout}>
-                    <LogOut className="h-4 w-4" />
+                  <Button variant="outline" className="w-full" onClick={handleLogout}>
                     로그아웃
                   </Button>
                 </div>

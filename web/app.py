@@ -7,6 +7,7 @@ from typing import Any
 import boto3
 from botocore.config import Config
 from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from filelock import FileLock
@@ -29,6 +30,21 @@ FRONTEND_DIST = next((candidate for candidate in FRONTEND_CANDIDATES if candidat
 FRONTEND_ASSETS = FRONTEND_DIST / 'assets' if FRONTEND_DIST and (FRONTEND_DIST / 'assets').exists() else None
 
 app = FastAPI()
+default_origins = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3300',
+    'http://127.0.0.1:3300',
+]
+env_origins = os.getenv('CORS_ALLOW_ORIGINS')
+allowed_origins = [origin.strip() for origin in (env_origins.split(',') if env_origins else default_origins) if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 STATIC_DIR = BASE_DIR / 'static'
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
@@ -269,6 +285,12 @@ class RecommendationRequest(BaseModel):
     category: str
 
 
+class CustomEventRequest(BaseModel):
+    event_type: str
+    metadata: dict[str, Any] | None = None
+    username: str | None = None
+
+
 def _frontend_index_path() -> Path | None:
     if FRONTEND_DIST:
         candidate = FRONTEND_DIST / 'index.html'
@@ -356,6 +378,13 @@ async def recommend(payload: RecommendationRequest, req: Request):
         },
         'courses': courses,
     }
+
+
+@api_router.post('/events')
+async def record_event(payload: CustomEventRequest, req: Request):
+    username = payload.username or 'anonymous'
+    _log_event(payload.event_type, username, payload.metadata or {}, req)
+    return {'ok': True}
 
 
 app.include_router(api_router)

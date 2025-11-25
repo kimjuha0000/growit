@@ -1,44 +1,46 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import CourseCard from "@/components/CourseCard";
+import YoutubeVideoCard from "@/components/YoutubeVideoCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Search as SearchIcon, TrendingUp } from "lucide-react";
+import { youtubeVideos, youtubeTrendingKeywords } from "@/lib/youtube-data";
+import { useAuth } from "@/hooks/use-auth";
+import { trackEvent } from "@/lib/analytics";
 
 const Search = () => {
   const [searchQuery, setSearchQuery] = useState("");
+  const { user } = useAuth();
 
-  const trendingKeywords = [
-    "React", "TypeScript", "Python", "UI/UX", "데이터 분석", 
-    "AI", "프론트엔드", "백엔드"
-  ];
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const lowered = searchQuery.toLowerCase();
+    return youtubeVideos.filter(
+      (video) =>
+        video.title.toLowerCase().includes(lowered) ||
+        video.channel.toLowerCase().includes(lowered) ||
+        video.tags.some((tag) => tag.toLowerCase().includes(lowered)),
+    );
+  }, [searchQuery]);
 
-  const searchResults = [
-    {
-      id: "1",
-      title: "React와 TypeScript로 시작하는 웹 개발",
-      instructor: "김개발",
-      thumbnail: "",
-      price: 49000,
-      rating: 4.8,
-      level: "초급",
-      students: 1250,
-    },
-    {
-      id: "2",
-      title: "Vue.js 3 완벽 가이드",
-      instructor: "정프론트",
-      thumbnail: "",
-      price: 45000,
-      rating: 4.6,
-      level: "중급",
-      students: 670,
-    },
-  ];
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+    const timer = setTimeout(() => {
+      trackEvent(
+        "search_query",
+        { query: searchQuery },
+        user?.username,
+      );
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [searchQuery, user?.username]);
 
-  const hasResults = searchResults.length > 0;
+  const handleTrendingClick = (keyword: string) => {
+    setSearchQuery(keyword);
+    trackEvent("search_keyword_click", { keyword }, user?.username);
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -68,16 +70,16 @@ const Search = () => {
                 <h2 className="text-lg font-semibold">인기 검색어</h2>
               </div>
               <div className="flex flex-wrap gap-2">
-                {trendingKeywords.map((keyword) => (
-                  <Badge
-                    key={keyword}
-                    variant="secondary"
-                    className="cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors"
-                    onClick={() => setSearchQuery(keyword)}
-                  >
-                    {keyword}
-                  </Badge>
-                ))}
+          {youtubeTrendingKeywords.map((keyword) => (
+            <Badge
+              key={keyword}
+              variant="secondary"
+              className="cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors"
+              onClick={() => handleTrendingClick(keyword)}
+            >
+              {keyword}
+            </Badge>
+          ))}
               </div>
             </div>
           )}
@@ -87,14 +89,24 @@ const Search = () => {
             <div>
               <div className="mb-6">
                 <h2 className="text-xl font-semibold">
-                  '{searchQuery}' 검색 결과 {hasResults && `(${searchResults.length})`}
+                  '{searchQuery}' 검색 결과 ({searchResults.length})
                 </h2>
               </div>
 
-              {hasResults ? (
+              {searchResults.length > 0 ? (
                 <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {searchResults.map((course) => (
-                    <CourseCard key={course.id} {...course} />
+                  {searchResults.map((video) => (
+                    <YoutubeVideoCard
+                      key={video.id}
+                      video={video}
+                      onOpen={(item) =>
+                        trackEvent(
+                          "video_open",
+                          { videoId: item.id, source: "search_results", query: searchQuery },
+                          user?.username,
+                        )
+                      }
+                    />
                   ))}
                 </div>
               ) : (
@@ -111,16 +123,16 @@ const Search = () => {
                     <h4 className="text-sm font-semibold">추천 카테고리</h4>
                     <div className="flex flex-wrap gap-2">
                       <Button variant="outline" asChild>
-                        <a href="/courses?category=dev">개발</a>
+                        <a href="/categories?category=data-engineering">데이터 엔지니어링</a>
                       </Button>
                       <Button variant="outline" asChild>
-                        <a href="/courses?category=design">디자인</a>
+                        <a href="/categories?category=product-design">디자인</a>
                       </Button>
                       <Button variant="outline" asChild>
-                        <a href="/courses?category=ai">AI</a>
+                        <a href="/categories?category=ai-labs">AI</a>
                       </Button>
                       <Button variant="outline" asChild>
-                        <a href="/courses?category=data">데이터 분석</a>
+                        <a href="/categories?category=cloud-platforms">클라우드</a>
                       </Button>
                     </div>
                   </div>
