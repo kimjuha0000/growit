@@ -1,12 +1,18 @@
 import json
 import os
+import random
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import boto3
 from botocore.config import Config
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+import pendulum
+import requests
+from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -54,6 +60,26 @@ if FRONTEND_ASSETS:
 BRONZE_ROOT = Path('/data/bronze/app')
 BRONZE_ROOT.mkdir(parents=True, exist_ok=True)
 USERS_PATH = Path(__file__).with_name('users.json')
+TRAFFIC_DEFAULT_TARGET = os.getenv('TRAFFIC_TARGET_URL', 'http://web:3000/api/events')
+TRAFFIC_MAX_REQUESTS = 20000
+TRAFFIC_MAX_CONCURRENCY = 200
+traffic_state: dict[str, Any] = {
+    'status': 'idle',
+    'message': 'ready',
+    'last_started': None,
+    'last_finished': None,
+    'summary': {},
+}
+traffic_lock = threading.Lock()
+TRAFFIC_ACTIONS = ['login', 'view_home', 'search', 'view_product', 'cart', 'checkout', 'logout']
+TRAFFIC_PATHS = ['/', '/feed', '/product/1', '/product/2', '/cart', '/checkout']
+TRAFFIC_UA = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+    'Mozilla/5.0 (Linux; x86_64)',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X)',
+    'Mozilla/5.0 (Android 14; Mobile)',
+]
 
 
 def _build_courses(slug: str, theme: str, providers: list[str], levels: list[str], durations: list[str], total: int = 100):
@@ -291,6 +317,101 @@ class CustomEventRequest(BaseModel):
     username: str | None = None
 
 
+class TrafficTrigger(BaseModel):
+    target_url: str | None = None
+    total_requests: int = 1000
+    concurrency: int = 50
+    user_pool: int = 2000
+    method: str = 'POST'
+    timeout_seconds: float = 5.0
+
+
+def _update_traffic_state(status: str, message: str, summary: dict[str, Any] | None = None):
+    with traffic_lock:
+        traffic_state['status'] = status
+        traffic_state['message'] = message
+        traffic_state['summary'] = summary or {}
+        now = pendulum.now('Asia/Seoul').isoformat()
+        if status == 'running':
+            traffic_state['last_started'] = now
+        elif status in {'ok', 'error'}:
+            traffic_state['last_finished'] = now
+
+
+def _run_traffic_spike(conf: TrafficTrigger):
+    target = conf.target_url or TRAFFIC_DEFAULT_TARGET
+    if not target:
+        _update_traffic_state('error', 'target_url 혹은 TRAFFIC_TARGET_URL이 필요합니다.')
+        return
+    if conf.total_requests > TRAFFIC_MAX_REQUESTS or conf.concurrency > TRAFFIC_MAX_CONCURRENCY:
+        _update_traffic_state('error', f'요청 제한 초과 (<= {TRAFFIC_MAX_REQUESTS}건, 동시 {TRAFFIC_MAX_CONCURRENCY} 이하)')
+        return
+
+    method = conf.method.upper()
+    if method not in {'GET', 'POST'}:
+        _update_traffic_state('error', 'method는 GET 또는 POST만 허용됩니다.')
+        return
+
+    _update_traffic_state(
+        'running',
+        f'{target} 로 총 {conf.total_requests}건, 동시 {conf.concurrency}개 전송 중',
+        {'target': target, 'total': conf.total_requests, 'concurrency': conf.concurrency},
+    )
+
+    def _fire_once(idx: int):
+        user_id = f'user-{idx % conf.user_pool:05d}'
+        event_type = random.choice(TRAFFIC_ACTIONS)
+        payload = {
+            'event_type': event_type,
+            'metadata': {
+                'path': random.choice(TRAFFIC_PATHS),
+                'ts': pendulum.now('Asia/Seoul').to_iso8601_string(),
+            },
+            'username': user_id,
+        }
+        headers = {
+            'X-User-Id': user_id,
+            'User-Agent': random.choice(TRAFFIC_UA),
+            'X-Load-Test': 'traffic_button',
+        }
+        try:
+            if method == 'GET':
+                resp = requests.get(target, params=payload, headers=headers, timeout=conf.timeout_seconds)
+            else:
+                resp = requests.post(target, json=payload, headers=headers, timeout=conf.timeout_seconds)
+            resp.raise_for_status()
+            return True, resp.status_code
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)
+
+    start = time.time()
+    successes = 0
+    failures: list[str] = []
+    with ThreadPoolExecutor(max_workers=conf.concurrency) as pool:
+        futures = [pool.submit(_fire_once, idx) for idx in range(conf.total_requests)]
+        for fut in as_completed(futures):
+            ok, detail = fut.result()
+            if ok:
+                successes += 1
+            else:
+                failures.append(detail)
+
+    elapsed = time.time() - start
+    rps = successes / elapsed if elapsed else successes
+    summary = {
+        'target': target,
+        'sent': conf.total_requests,
+        'success': successes,
+        'failed': len(failures),
+        'duration_sec': round(elapsed, 2),
+        'approx_rps': round(rps, 1),
+        'sample_failures': failures[:5],
+    }
+    status = 'ok' if successes else 'error'
+    message = '모든 요청 실패' if successes == 0 else f'완료 ({successes}/{conf.total_requests}, {round(rps,1)} rps)'
+    _update_traffic_state(status, message, summary)
+
+
 def _frontend_index_path() -> Path | None:
     if FRONTEND_DIST:
         candidate = FRONTEND_DIST / 'index.html'
@@ -321,6 +442,19 @@ def _serve_frontend_asset(path: str) -> FileResponse | None:
 
 
 api_router = APIRouter(prefix='/api')
+
+
+@api_router.post('/traffic/trigger')
+async def trigger_traffic(payload: TrafficTrigger, background: BackgroundTasks):
+    _update_traffic_state('queued', '버튼 트리거 수신, 전송 준비 중', payload.dict())
+    background.add_task(_run_traffic_spike, payload)
+    return {'ok': True, 'state': traffic_state}
+
+
+@api_router.get('/traffic/status')
+def traffic_status():
+    with traffic_lock:
+        return traffic_state.copy()
 
 
 @api_router.post('/login')
@@ -403,6 +537,14 @@ def legacy_categories():
 @app.post('/recommendations')
 async def legacy_recommend(payload: RecommendationRequest, req: Request):
     return await recommend(payload, req)
+
+
+@app.get('/traffic', response_class=HTMLResponse)
+def traffic_page():
+    page = STATIC_DIR / 'traffic.html'
+    if page.exists():
+        return FileResponse(page)
+    raise HTTPException(status_code=404, detail='traffic.html이 없습니다.')
 
 
 @app.get('/', response_class=HTMLResponse)

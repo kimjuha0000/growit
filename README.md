@@ -7,7 +7,7 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
 | 계층 | 사용 기술 | 역할 |
 | --- | --- | --- |
 | 프론트엔드 | React 18, Vite, TypeScript, shadcn/ui | `growit/` 폴더. `npm run build`로 만든 `dist/`를 FastAPI가 서빙합니다. |
-| 웹/API | FastAPI (`web/app.py`) | `/api/login`, `/api/categories`, `/api/recommendations` 제공. `users.json`을 기준으로 인증하고 JSONL 이벤트를 기록하며, 필요 시 MinIO로 업로드합니다. |
+| 웹/API | FastAPI (`web/app.py`) | `/api/login`, `/api/categories`, `/api/recommendations` + `/api/events` 로깅 제공. `/traffic` 페이지 + `/api/traffic/trigger`로 버튼 한 번에 대량 트래픽을 발생시킬 수 있습니다. |
 | 워크플로 | Airflow (`airflow/`) | 브론즈(JSONL) 데이터를 주기적으로 Spark 작업으로 넘겨줍니다. |
 | 처리 | Spark + Delta (`spark/app/job_etl.py`) | `/data/bronze/app`을 읽어 Delta/Parquet 레이어와 Postgres 마트로 적재합니다. |
 | 저장소 | Postgres, MinIO, Delta Lake | Zeppelin이나 외부 BI 도구에서 조회할 수 있는 최종 지표를 제공합니다. |
@@ -28,8 +28,8 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
    cd learningpipeline
    cp .env.example .env   # 존재한다면 복사 후 MinIO/DB 정보 확인
    ```
-2. **폴더 권한 확인**  
-   `data/`, `pg/`, `tmp/`, `zeppelin/` 등은 Docker 컨테이너에서 읽고 쓸 수 있어야 합니다. Windows라면 PowerShell에서 아래 명령을 실행해 `Users` 그룹에 읽기/쓰기 권한을 부여하세요.
+2. **폴더 권한 확인 + Git 제외**  
+   `data/`, `pg/`, `tmp/`, `zeppelin/` 등은 Docker 컨테이너에서 읽고 쓸 수 있어야 합니다. Windows라면 PowerShell에서 아래 명령을 실행해 `Users` 그룹에 읽기/쓰기 권한을 부여하세요. 이 폴더들과 `.env`는 `.gitignore`로 제외되어 있으므로 커밋에 올리지 마세요.
    ```powershell
    # 프로젝트 루트(C:\Users\PC\Desktop\projects\growit)에서 실행
    mkdir data,pg,tmp -Force
@@ -52,10 +52,11 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
    npm install
    npm run build    # dist/ 생성 → FastAPI가 자동 서빙
    ```
-5. **웹 접속 후 체험**
+5. **웹 접속 후 체험 + 스파이크 테스트**
    - 브라우저에서 `http://localhost:3000` 접속.
    - 샘플 계정: `datafan/pass1234`, `growthhacker/grow2025`, `juniordev/devstart`.
    - 로그인 → 카테고리 선택 → “추천 강의 요청”을 누르면 이벤트가 `/data/bronze/app`과 MinIO(선택)로 기록되고, Airflow → Spark → Delta/Postgres → Zeppelin 흐름으로 흘러갑니다.
+   - 트래픽 증가 테스트: `http://localhost:3000/traffic`에서 요청 수·동시성·타임아웃을 지정해 실행하면 `/api/events`에 부하를 주고 `/data/bronze/app/YYYY/MM/DD/part-*.jsonl`에 누적됩니다. 상태는 `/api/traffic/status`로 확인하세요.
 
 > 📌 **프론트엔드 개발 중이라면**  
 > `growit/.env.local` 파일에 `VITE_API_BASE_URL=http://localhost:3000/api`를 추가한 뒤 `npm run dev`로 개발 서버(기본 5173포트)를 띄우면 빠르게 UI를 수정할 수 있습니다.
@@ -75,6 +76,9 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
   - `/api/*` 경로와 기존 `/login`, `/categories`, `/recommendations` 경로를 동시에 유지해 하위 호환성을 확보했습니다.
   - 10개의 카테고리 × 100개의 강의 URL을 생성하는 `COURSE_CATALOG`를 보관합니다.
   - 로그인, 추천뿐 아니라 프런트에서 전달하는 맞춤 이벤트(`/api/events`)도 모두 `/data/bronze/app/YYYY/MM/DD/part-YYYYMMDD-HH.jsonl`에 저장하고, `USE_MINIO=true`일 때 MinIO `logs` 버킷으로 동기화합니다. 이벤트 `metadata`에는 검색어, 영상 클릭, 카테고리 선택 시각 등 UI 측정 값이 그대로 남습니다.
+- **트래픽 스파이크 툴**
+  - `/traffic`은 단일 HTML 컨트롤 패널입니다. `/api/traffic/trigger`로 POST를 보내 백그라운드에서 총 요청 수/동시성/유저풀을 적용한 부하를 발생시키고, `/api/traffic/status`로 진행 상황(RPS, 성공/실패)을 확인합니다.
+  - 기본 타깃은 `TRAFFIC_TARGET_URL`(기본 `http://web:3000/api/events`)이며 최대 20,000건/동시 200개로 제한됩니다. 헤더 `X-Load-Test: traffic_button`이 자동 추가됩니다.
 - `web/ERD.md`에서 사용자·카테고리·강의·이벤트 간 관계를 Mermaid 다이어그램으로 정리했습니다.
 
 ### 이벤트 로깅 참고

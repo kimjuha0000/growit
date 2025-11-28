@@ -42,6 +42,7 @@ Spark Job (spark/app/job_etl.py) → Delta Lake (/data/delta/…)
 | Node.js 18+ / npm | GrowIt 프론트엔드를 빌드할 때 필요. |
 | 필수 포트 | 3000(웹), 5432(Postgres), 7077(Spark), 8081(Zeppelin), 8082(Airflow), 9000/9001(MinIO). |
 | 폴더 권한 | `data/`, `pg/`, `tmp/`, `zeppelin/` 등 Docker가 마운트하는 경로는 모두 쓰기 가능해야 합니다. Windows라면 해당 폴더 > 속성 > 보안 > Users 그룹에 수정 권한 부여. |
+| Git 제외 대상 | `.env`, `data/`, `pg/`, `tmp/`, `zeppelin/` 등은 `.gitignore`로 제외되어 있습니다. 커밋 시 데이터/로그가 포함되지 않았는지 확인하세요. |
 
 ## GrowIt 프론트엔드
 
@@ -78,6 +79,7 @@ Spark Job (spark/app/job_etl.py) → Delta Lake (/data/delta/…)
   - `/api/recommendations`: 선택한 카테고리의 100개 강의 목록을 반환하고 `category_recommendation` 이벤트를 기록합니다.
   - 앞선 세 API는 `/login`, `/categories`, `/recommendations`라는 구 버전 경로도 그대로 유지합니다.
   - 모든 이벤트는 `/data/bronze/app/YYYY/MM/DD/part-YYYYMMDD-HH.jsonl` 형식으로 적재되며, `USE_MINIO=true`일 때 MinIO `logs` 버킷에도 전체 파일을 업로드합니다.
+  - `/traffic` HTML 패널과 `/api/traffic/trigger`(POST), `/api/traffic/status`(GET)를 통해 대량 트래픽을 백그라운드로 전송할 수 있습니다. 기본 타깃은 `TRAFFIC_TARGET_URL`(기본 `http://web:3000/api/events`), 최대 20,000건/동시 200개 제한, `X-Load-Test: traffic_button` 헤더 자동 추가.
 
 - **ERD 문서**
   - `web/ERD.md`에서 USERS, CATEGORIES, COURSES, RECOMMENDATION_REQUESTS, EVENTS, BRONZE_FILES 관계를 Mermaid 다이어그램으로 정리했습니다.
@@ -160,6 +162,7 @@ Spark Job (spark/app/job_etl.py) → Delta Lake (/data/delta/…)
 | 브라우저에서 빈 화면 | `npm run build` 미실행 또는 `dist/` 누락 | `growit`에서 다시 빌드 |
 | Vite 개발 서버에서 API 404 | `VITE_API_BASE_URL` 미설정 | `.env.local`에 FastAPI 주소 추가 |
 | `/data/bronze/app`에 쓰기 실패 | 권한 부족 | 위의 chown/chmod 명령으로 조정 |
+| 트래픽 스파이크 실패 | `TRAFFIC_TARGET_URL` 미설정, 20k/200 제한 초과, 네트워크 타임아웃 | `/api/traffic/status`로 에러 메시지 확인 후 파라미터 축소 또는 타깃 URL 지정 |
 | MinIO 업로드 실패 | 버킷 없음 / 키 오류 | `logs` 버킷 생성 및 정책 설정, 환경 변수 재확인 |
 | Airflow DAG Spark 단계 오류 | Delta 패키지 또는 `/data` 권한 문제 | Spark 인터프리터 설정/권한 점검 |
 | Zeppelin에서 MinIO 접근 실패 | S3A 설정 누락 | `spark.hadoop.fs.s3a.*` 옵션과 AWS SDK 패키지 확인 |

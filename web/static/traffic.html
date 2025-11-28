@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>트래픽 스파이크 트리거</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: dark; font-family: 'Pretendard', system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: #0a0c13; color: #e8ecff; min-height: 100vh; display: grid; place-items: center; }
+    .card { width: min(720px, 94vw); background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; padding: 24px; box-shadow: 0 16px 36px rgba(0,0,0,0.35); }
+    h1 { margin: 0 0 6px; }
+    p { color: #9aa2c5; margin-top: 0; }
+    label { display: block; margin: 14px 0 6px; font-weight: 600; }
+    input, select { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: #e8ecff; }
+    button { margin-top: 18px; width: 100%; padding: 14px; border-radius: 12px; border: none; background: linear-gradient(135deg, #6c5ce7, #00c6ff); color: #fff; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status { margin-top: 16px; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.25); }
+    .row { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    code { color: #8be9fd; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>트래픽 스파이크 트리거</h1>
+    <p>버튼을 눌러 필요할 때만 대량 요청을 발생시킵니다. 기본값은 안전하게 제한되어 있습니다.</p>
+
+    <label>대상 URL (비워두면 TRAFFIC_TARGET_URL 또는 기본 API 이벤트 엔드포인트)</label>
+    <input id="target" placeholder="http://web:3000/api/events" />
+
+    <div class="row">
+      <div>
+        <label>총 요청 수</label>
+        <input id="total" type="number" value="1000" min="1" max="20000" />
+      </div>
+      <div>
+        <label>동시 실행 수</label>
+        <input id="concurrency" type="number" value="50" min="1" max="200" />
+      </div>
+      <div>
+        <label>유저 풀 크기</label>
+        <input id="users" type="number" value="2000" min="1" max="50000" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>HTTP 메서드</label>
+        <select id="method">
+          <option value="POST">POST</option>
+          <option value="GET">GET</option>
+        </select>
+      </div>
+      <div>
+        <label>타임아웃(초)</label>
+        <input id="timeout" type="number" value="5" min="1" max="30" />
+      </div>
+    </div>
+
+    <button id="triggerBtn">스파이크 실행</button>
+
+    <div class="status" id="statusBox">
+      상태: idle
+    </div>
+  </div>
+
+  <script>
+    const statusBox = document.getElementById('statusBox');
+    const triggerBtn = document.getElementById('triggerBtn');
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/api/traffic/status');
+        const data = await res.json();
+        statusBox.textContent = `상태: ${data.status} | ${data.message || ''}`;
+        if (data.summary) {
+          const s = data.summary;
+          statusBox.textContent += ` (sent ${s.sent || 0}, ok ${s.success || 0}, fail ${s.failed || 0}, rps ${s.approx_rps || 0})`;
+        }
+      } catch (e) {
+        statusBox.textContent = '상태 조회 실패: ' + e.message;
+      }
+    }
+
+    async function trigger() {
+      triggerBtn.disabled = true;
+      statusBox.textContent = '요청 전송 준비 중...';
+      const payload = {
+        target_url: document.getElementById('target').value || null,
+        total_requests: Number(document.getElementById('total').value || 0),
+        concurrency: Number(document.getElementById('concurrency').value || 0),
+        user_pool: Number(document.getElementById('users').value || 0),
+        method: document.getElementById('method').value,
+        timeout_seconds: Number(document.getElementById('timeout').value || 5),
+      };
+      try {
+        const res = await fetch('/api/traffic/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        statusBox.textContent = `실행 요청됨: ${data.state?.message || ''}`;
+      } catch (e) {
+        statusBox.textContent = '트리거 실패: ' + e.message;
+      } finally {
+        triggerBtn.disabled = false;
+        refreshStatus();
+      }
+    }
+
+    triggerBtn.addEventListener('click', trigger);
+    refreshStatus();
+    setInterval(refreshStatus, 3000);
+  </script>
+</body>
+</html>

@@ -4,3 +4,4 @@ pydantic
 pendulum
 filelock
 boto3
+requests
