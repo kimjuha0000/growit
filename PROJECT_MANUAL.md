@@ -1,171 +1,139 @@
-# 러닝 파이프라인 허브 기술 설명서
+# Learning Pipeline Hub - 프로젝트 상세 매뉴얼
 
-이 문서는 README보다 한 단계 깊게 들어가 FastAPI + GrowIt SPA, Airflow → Spark/Delta → Postgres → Zeppelin까지 이어지는 흐름을 상세하게 설명합니다. 환경 준비, 서비스별 설정, 사용자 여정 시뮬레이션, 오류 대응 팁 등을 모두 한곳에 정리했습니다.
+이 문서는 Learning Pipeline Hub 프로젝트의 아키텍처, 구성 요소별 역할, 데이터 흐름 등 내부 동작을 상세히 설명합니다.
 
-## 목차
-1. [전체 구조](#전체-구조)  
-2. [사전 준비](#사전-준비)  
-3. [GrowIt 프론트엔드](#growit-프론트엔드)  
-4. [FastAPI 백엔드](#fastapi-백엔드)  
-5. [데이터 파이프라인 (Airflow/Spark/Delta/Postgres/MinIO)](#데이터-파이프라인-airflowsparkdeltapostgresminio)  
-6. [서비스별 운영 팁](#서비스별-운영-팁)  
-7. [사용자 여정 시뮬레이션](#사용자-여정-시뮬레이션)  
-8. [트러블슈팅 요약](#트러블슈팅-요약)
+`README.md`가 프로젝트를 빠르게 실행하는 데 초점을 맞춘다면, 이 문서는 **"왜 이렇게 구성되었는가?"** 와 **"내부에서 데이터가 어떻게 움직이는가?"** 에 대한 깊은 이해를 돕기 위해 작성되었습니다.
+
+## 0. 프로젝트 실행 환경 요구사항
+
+이 프로젝트는 Docker를 기반으로 구축되었습니다. 따라서 프로젝트를 구동하기 위한 필수 전제 조건은 **Docker가 설치되어 있는 환경**입니다.
+
+새로운 PC에서 이 프로젝트를 실행하고자 할 경우, 다음 사항을 **PC 당 최초 1회** 설정해야 합니다. 이 설정들은 프로젝트 코드와 함께 Git에 포함되지 않으며, 각 PC의 운영체제 환경에 의존합니다.
+
+1.  **Docker 설치:** 먼저 PC에 Docker Desktop (Windows/macOS) 또는 Docker Engine (Linux)을 설치해야 합니다.
+2.  **권한 설정:** Docker 컨테이너가 호스트 머신의 특정 폴더에 데이터를 읽고 쓸 수 있도록 해당 폴더에 대한 권한을 설정해야 합니다.
 
 ---
 
-## 전체 구조
+## 1. 권한 설정 가이드
 
+Docker는 컨테이너 내부의 사용자(User)와 호스트 머신의 사용자가 달라 파일 접근 권한 문제가 발생할 수 있습니다. 특히 컨테이너가 생성한 데이터를 호스트 머신의 폴더(볼륨)에 저장할 때 이 문제가 두드러집니다.
+
+### 1.1. Docker 실행 권한 (macOS / Linux 사용자)
+
+매번 `sudo`를 입력하지 않고 `docker` 명령어를 사용하려면, 현재 사용자를 `docker` 그룹에 추가해야 합니다.
+
+```bash
+# docker 그룹이 없으면 생성
+sudo groupadd docker
+
+# 현재 사용자를 docker 그룹에 추가
+sudo usermod -aG docker $USER
+
+# 변경 사항을 적용하려면 로그아웃 후 다시 로그인하거나, newgrp 명령을 사용합니다.
+newgrp docker
 ```
-React/Vite (GrowIt SPA)
-   │  /api/* 요청
-FastAPI (web/app.py) ───▶ /data/bronze/app/part-*.jsonl (+ MinIO 업로드)
-   │                          │
-   │ Airflow DAG              ▼
-Spark Job (spark/app/job_etl.py) → Delta Lake (/data/delta/…)
-   │                                     │
-   └────▶ Postgres mart 스키마 ◀──────────┘
-                        │
-                   Zeppelin 대시보드
-```
+터미널을 재시작하면 `sudo` 없이 `docker compose ps`와 같은 명령을 실행할 수 있습니다.
 
-- **프론트엔드**: `growit/`에서 개발. React Query + shadcn/ui. Vite로 빌드한 뒤 FastAPI가 정적 자산을 제공합니다.
-- **웹/API**: `web/app.py`가 로그인·카테고리·추천 API를 제공하고 JSONL 이벤트를 기록합니다.
-- **워크플로**: Airflow DAG가 Bronze 로그를 감지해 Spark ETL을 실행합니다.
-- **저장소**: Delta Lake, Postgres, MinIO에 결과가 쌓여 Zeppelin 등에서 조회합니다.
+### 1.2. 공유 볼륨 폴더 권한
 
-## 사전 준비
+`data`, `pg`, `tmp` 폴더는 여러 컨테이너가 데이터를 읽고 쓰는 공유 공간입니다. 따라서 컨테이너 내부의 프로세스가 이 폴더들에 접근할 수 있도록 호스트 머신에서 적절한 권한을 부여해야 합니다.
 
-| 항목 | 설명 |
-| --- | --- |
-| Docker Desktop + WSL2 | Windows에서 실행 시 필수. |
-| Node.js 18+ / npm | GrowIt 프론트엔드를 빌드할 때 필요. |
-| 필수 포트 | 3000(웹), 5432(Postgres), 7077(Spark), 8081(Zeppelin), 8082(Airflow), 9000/9001(MinIO). |
-| 폴더 권한 | `data/`, `pg/`, `tmp/`, `zeppelin/` 등 Docker가 마운트하는 경로는 모두 쓰기 가능해야 합니다. Windows라면 해당 폴더 > 속성 > 보안 > Users 그룹에 수정 권한 부여. |
-| Git 제외 대상 | `.env`, `data/`, `pg/`, `tmp/`, `zeppelin/` 등은 `.gitignore`로 제외되어 있습니다. 커밋 시 데이터/로그가 포함되지 않았는지 확인하세요. |
+-   **Windows (PowerShell 관리자 권한으로 실행):**
+    ```powershell
+    # 프로젝트 루트 폴더에서 실행합니다.
+    # data, pg, tmp 폴더를 만들고, 모든 사용자(Users 그룹)에게
+    # 모든 권한(F)을 하위 폴더와 파일에도 상속(OI, CI)하며 적용(T)합니다.
+    mkdir data, pg, tmp -Force
+    icacls data, pg, tmp /grant "Users:(OI)(CI)F" /T
+    ```
 
-## GrowIt 프론트엔드
+-   **macOS / Linux:**
+    ```bash
+    # 프로젝트 루트 폴더에서 실행합니다.
+    mkdir -p data pg tmp
 
-1. **설치 & 빌드**
-   ```bash
-   cd growit
-   npm install
-   npm run build
-   ```
-   이때 생성되는 `dist/`가 FastAPI에서 자동으로 감지되어 `/assets` 경로로 제공됩니다.
+    # 폴더 소유자를 현재 사용자로 변경하고,
+    # 소유자와 그룹에 읽기/쓰기/실행 권한을 부여합니다.
+    # sudo chown -R $USER:$USER data pg tmp
+    chmod -R 775 data pg tmp
+    ```
 
-2. **개발 서버**
-   ```bash
-   npm run dev
-   ```
-   - `growit/.env.local` 파일에 `VITE_API_BASE_URL=http://localhost:3000/api`를 넣으면 개발 서버(5173 포트)에서도 FastAPI API를 사용할 수 있습니다.
+## 2. 아키텍처와 컨테이너별 역할
 
-3. **구조 요약**
-   - `src/App.tsx`: `AuthProvider`와 React Query로 전체 앱을 감싼 뒤 라우터를 설정합니다.
-   - `src/lib/api.ts` / `src/types/pipeline.ts`: FastAPI 응답을 타입으로 관리하는 헬퍼.
-   - `src/hooks/use-auth.tsx`: 로그인 결과를 localStorage에 저장하고, Navbar나 보호된 페이지에서 접근할 수 있도록 하는 컨텍스트.
-   - `src/pages/Categories.tsx`: 새로운 GrowIt 디자인에 맞춰 카테고리 선택, 파이프라인 타임라인, 추천 결과를 보여줍니다.
-   - `src/components/Categories.tsx`: 홈 화면용 미리보기. `/api/categories` 응답을 기반으로 콘텐츠를 표시합니다.
+이 프로젝트는 여러 전문화된 오픈소스들을 조합하여 현대적인 데이터 플랫폼을 구축한 마이크로서비스 아키텍처(MSA)를 따릅니다.
 
-## FastAPI 백엔드
+### 컨테이너별 역할과 당위성 (Justification)
 
-- **정적 자산 제공**
-  - `web/app.py`는 `growit/dist`(혹은 하위 폴더) 존재 여부를 확인해 `/assets` 마운트 및 SPA 라우팅을 설정합니다.
-  - `web/static/` 내 HTML은 빌드가 없을 때 사용하는 백업 UI입니다.
+| 컨테이너 | 기술 | 역할 (무엇을 하는가?) | 당위성 (왜 필요한가?) |
+| --- | --- | --- | --- |
+| `web` | FastAPI (Python) | API 서버 및 프론트엔드 서빙 | 사용자와의 접점. 이벤트 데이터를 수신하여 파이프라인에 전달하는 첫 관문. |
+| `growit` | React (Node.js) | 사용자 인터페이스(UI) | 사용자가 실제로 보고 상호작용하는 웹 화면. 이 프로젝트의 데이터 발생 근원지. |
+| `minio` | MinIO | 객체 스토리지 (S3 호환) | 수집된 원본 데이터를 안전하고 저렴하게 보관하는 **데이터 레이크** 역할. |
+| `postgres` | PostgreSQL | 관계형 데이터베이스(RDB) | 최종적으로 집계/처리된 데이터를 저장하는 **데이터 마트** 역할. BI 툴 연동에 용이. |
+| `airflow` | Airflow | 워크플로 관리 | "매일 새벽 1시에 Spark ETL 실행"과 같은 복잡한 데이터 작업을 예약/관리/모니터링. |
+| `spark` | Spark | 분산 데이터 처리 엔진 | 대용량의 원본 데이터를 읽어 정제, 변환, 집계하는 **ETL의 핵심 두뇌**. |
+| `zeppelin` | Zeppelin | 웹 기반 노트북 | 분석가가 Spark, SQL 등을 사용해 데이터를 탐색하고 시각화하는 **분석 환경**. |
 
-- **API & 이벤트 로깅**
-  - `/api/login`: `users.json`을 기준으로 인증하고 `login` 이벤트를 JSONL에 기록합니다.
-  - `/api/categories`: 10개의 카테고리 목록(아이콘, 색상, 샘플 링크, 강의 수)을 제공합니다.
-  - `/api/recommendations`: 선택한 카테고리의 100개 강의 목록을 반환하고 `category_recommendation` 이벤트를 기록합니다.
-  - 앞선 세 API는 `/login`, `/categories`, `/recommendations`라는 구 버전 경로도 그대로 유지합니다.
-  - 모든 이벤트는 `/data/bronze/app/YYYY/MM/DD/part-YYYYMMDD-HH.jsonl` 형식으로 적재되며, `USE_MINIO=true`일 때 MinIO `logs` 버킷에도 전체 파일을 업로드합니다.
-  - `/traffic` HTML 패널과 `/api/traffic/trigger`(POST), `/api/traffic/status`(GET)를 통해 대량 트래픽을 백그라운드로 전송할 수 있습니다. 기본 타깃은 `TRAFFIC_TARGET_URL`(기본 `http://web:3000/api/events`), 최대 20,000건/동시 200개 제한, `X-Load-Test: traffic_button` 헤더 자동 추가.
+---
 
-- **ERD 문서**
-  - `web/ERD.md`에서 USERS, CATEGORIES, COURSES, RECOMMENDATION_REQUESTS, EVENTS, BRONZE_FILES 관계를 Mermaid 다이어그램으로 정리했습니다.
+## 3. 데이터 파이프라인 상세 흐름
 
-## 데이터 파이프라인 (Airflow/Spark/Delta/Postgres/MinIO)
+사용자의 클릭 한 번이 어떻게 분석 가능한 데이터가 되는지 전 과정을 따라가 보겠습니다.
 
-### Airflow
-- 위치: `airflow/`. DAG 예시는 `logs_etl`.
-- UI: `http://localhost:8082` (기본 `admin/admin`).
-- DAG는 `/data/bronze/app`을 파싱해 Spark 작업을 실행하고 Delta + Postgres에 적재합니다.
+-   **Bronze**: 원본 데이터 (날것)
+-   **Silver**: 정제/변환된 데이터
+-   **Gold**: 최종 집계/분석용 데이터
 
-### Spark & Delta
-- 스크립트: `spark/app/job_etl.py`.
-- `/data` 경로를 Spark Master/Worker, Airflow가 모두 읽고 쓸 수 있어야 합니다. 권한 문제 시 다음 명령으로 조정하세요.
-  ```bash
-  docker compose exec --user root spark-master bash -c "chown -R spark:spark /data && chmod -R 775 /data"
-  docker compose exec --user root spark-worker bash -c "chown -R spark:spark /data && chmod -R 775 /data"
-  docker compose exec --user root airflow bash -c "chown -R airflow:root /data && chmod -R 775 /data"
-  ```
+**`[1단계]` 데이터 발생 (Frontend: `growit`)**
+-   사용자가 브라우저(`http://localhost:3300`)에서 특정 카테고리의 "추천 강의 요청" 버튼을 클릭합니다.
+-   React 앱은 `axios`와 같은 라이브러리를 사용해 백엔드 서버로 API 요청을 보냅니다. (예: `POST /api/events`)
 
-### Postgres
-- 데이터 디렉터리: `pg/`.
-- `.env`에서 `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`를 확인하세요.
-- 예시 쿼리:
-  ```bash
-  psql -h localhost -U analytics -d dwh -c "SELECT * FROM mart.daily_events ORDER BY event_date DESC LIMIT 10"
-  ```
+**`[2단계]` 로그 수집 (Backend: `web`)**
+-   FastAPI 서버가 `/api/events` 요청을 수신합니다.
+-   `web/app.py`의 `_log_event` 함수는 요청 내용(`event_type`, `metadata` 등)과 서버 정보(IP, User-Agent)를 조합하여 하나의 JSON 객체를 생성합니다.
 
-### MinIO
-- 콘솔: `http://localhost:9001` (admin/admin12345).
-- 처음 실행하면 `logs` 버킷을 만들고 다운로드 정책을 `download`로 설정하세요.
-  ```bash
-  docker compose exec minio mc alias set local http://localhost:9000 admin admin12345
-  docker compose exec minio mc mb -p local/logs
-  docker compose exec minio mc policy set download local/logs
-  ```
+**`[3단계]` 원본 데이터 저장 (Bronze Layer: `web` → `data`/`minio`)**
+-   생성된 JSON 객체는 한 줄의 문자열로 변환되어, 호스트와 공유된 볼륨(`data/`)의 날짜별 폴더에 `.jsonl` 파일로 추가(append)됩니다. (예: `data/bronze/app/2025/11/28/... .jsonl`)
+-   `.env` 파일에 `USE_MINIO=true`로 설정되어 있으면, 이 파일은 `minio` 컨테이너의 `logs` 버킷에도 업로드됩니다. 이로써 원본 데이터가 데이터 레이크에 안전하게 보관됩니다.
 
-### Zeppelin
-- URL: `http://localhost:8081`.
-- Spark 인터프리터 설정 예시:
-  - `master`: `spark://spark-master:7077`
-  - `spark.submit.deployMode`: `client`
-  - `spark.jars.packages`: `io.delta:delta-spark_2.12:3.2.0,org.postgresql:postgresql:42.7.4,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.772`
-  - MinIO 옵션: `spark.hadoop.fs.s3a.endpoint=http://minio:9000`, `spark.hadoop.fs.s3a.access.key`, `spark.hadoop.fs.s3a.secret.key`, `spark.hadoop.fs.s3a.path.style.access=true`
-- 샘플 쿼리:
-  ```scala
-  %spark.sql
-  SELECT * FROM delta.`/data/delta/events` ORDER BY event_date DESC LIMIT 20;
-  ```
+**`[4단계]` ETL 작업 실행 (Orchestration: `airflow`)**
+-   `airflow` 컨테이너는 정해진 스케줄(예: 매일 자정)이 되면 `logs_etl`이라는 DAG(Directed Acyclic Graph)를 실행합니다.
+-   이 DAG의 주요 임무는 `spark-submit` 명령을 통해 `spark` 클러스터에 ETL 작업을 제출(submit)하는 것입니다.
 
-## 서비스별 운영 팁
+**`[5단계]` 데이터 처리 및 변환 (ETL / Silver Layer: `spark`)**
+-   `spark` 클러스터는 `spark/app/job_etl.py` 스크립트를 실행합니다.
+-   Spark는 먼저 Bronze Layer(`data/bronze/app` 또는 MinIO)에서 원본 `.jsonl` 파일들을 모두 읽어 데이터프레임으로 만듭니다.
+-   이후 스키마 적용, 타임스탬프 변환, 고유 ID 생성, 중복 제거 등 다양한 정제 및 변환 작업을 거쳐 분석에 용이한 '깨끗한 데이터'로 가공합니다.
 
-| 서비스 | 자주 쓰는 명령/URL | 설명 |
-| --- | --- | --- |
-| Docker Compose | `docker compose up -d --build` | 전체 스택 실행/갱신 |
-| FastAPI 단독 실행 | `cd web && uvicorn app:app --reload` | 도커 없이 백엔드만 테스트 |
-| 프론트엔드 개발 | `cd growit && npm run dev` | Vite 개발 서버 |
-| Airflow DAG 테스트 | `docker compose exec airflow airflow dags test logs_etl 2024-01-01` | 한 번만 실행해보고 싶을 때 |
-| Spark 잡 수동 실행 | `docker compose exec spark-master spark-submit /opt/spark/app/job_etl.py` | DAG 없이 ETL을 강제로 돌릴 때 |
+**`[6단계]` 데이터 적재 (Silver/Gold Layers: `spark` → `delta`/`postgres`)**
+-   **Silver Layer**: 가공된 데이터는 `/data/delta/events` 경로에 **Delta Lake** 형식으로 저장됩니다. 이때 `event_date` 기준으로 데이터가 파티셔닝되어 저장되므로, 특정 날짜를 조회할 때 성능이 매우 뛰어납니다.
+-   **Gold Layer**: 동시에, 동일한 데이터가 JDBC를 통해 `postgres` 컨테이너의 `mart.events` 테이블에도 저장됩니다. 이 테이블은 최종 분석이나 외부 BI 툴(Tableau 등)과 연동하기 위한 **데이터 마트** 역할을 합니다.
 
-## 사용자 여정 시뮬레이션
+**`[7단계]` 데이터 분석 (Analytics: `zeppelin`)**
+-   데이터 분석가는 `zeppelin` UI(`http://localhost:8181`)에 접속합니다.
+-   Zeppelin의 Spark 인터프리터를 사용하여 Delta Lake에 저장된 대용량 데이터를 직접 읽어와(예: `spark.read.format("delta").load(...)` ) PySpark이나 SQL로 자유롭게 탐색하고, 집계하고, 그 결과를 즉시 시각화합니다.
 
-1. **도커 스택**을 모두 띄우고, GrowIt을 `npm run build`로 빌드합니다.
-2. **웹 접속**: `http://localhost:3000`.
-3. **로그인**: `datafan/pass1234` 등 샘플 계정 사용.
-4. **카테고리 페이지**에서 관심 분야를 선택하고 “추천 강의 요청” 클릭.
-5. **브론즈 로그 확인**:
-   ```bash
-  docker compose exec web tail -n 5 /data/bronze/app/$(date +%Y/%m/%d)/part-$(date +%Y%m%d)-$(date +%H).jsonl
-   ```
-6. **Airflow DAG** 실행 → Delta/MinIO/Postgres 반영 확인.
-7. **Zeppelin** 또는 `psql`에서 최신 지표를 조회.
+## 4. 데이터 분석 방법
 
-매 로그인/추천마다 JSONL 2건이 생기고, DAG가 실행되면 Delta 및 Postgres에도 신규 레코드가 추가됩니다.
+Zeppelin을 사용한 데이터 분석은 주로 Spark 인터프리터를 통해 Delta Lake의 데이터를 직접 분석하는 방식을 권장합니다.
 
-## 트러블슈팅 요약
+1.  Zeppelin 노트에서 인터프리터를 `%spark.pyspark`로 설정합니다.
+2.  아래 코드로 Delta Lake 테이블을 로드하고, SQL 쿼리가 가능하도록 임시 뷰(View)를 생성합니다.
+    ```python
+    # /data/delta/events 경로의 델타 테이블을 읽어 df 라는 변수에 할당
+    df = spark.read.format("delta").load("/data/delta/events")
 
-| 증상 | 원인 | 해결책 |
-| --- | --- | --- |
-| 브라우저에서 빈 화면 | `npm run build` 미실행 또는 `dist/` 누락 | `growit`에서 다시 빌드 |
-| Vite 개발 서버에서 API 404 | `VITE_API_BASE_URL` 미설정 | `.env.local`에 FastAPI 주소 추가 |
-| `/data/bronze/app`에 쓰기 실패 | 권한 부족 | 위의 chown/chmod 명령으로 조정 |
-| 트래픽 스파이크 실패 | `TRAFFIC_TARGET_URL` 미설정, 20k/200 제한 초과, 네트워크 타임아웃 | `/api/traffic/status`로 에러 메시지 확인 후 파라미터 축소 또는 타깃 URL 지정 |
-| MinIO 업로드 실패 | 버킷 없음 / 키 오류 | `logs` 버킷 생성 및 정책 설정, 환경 변수 재확인 |
-| Airflow DAG Spark 단계 오류 | Delta 패키지 또는 `/data` 권한 문제 | Spark 인터프리터 설정/권한 점검 |
-| Zeppelin에서 MinIO 접근 실패 | S3A 설정 누락 | `spark.hadoop.fs.s3a.*` 옵션과 AWS SDK 패키지 확인 |
-| npm install 중 캐시 오류 | 호스트 npm 캐시 손상 | `~/.npm` 삭제 후 재설치 |
-
-추가로 궁금한 내용이나 설정 변경이 필요하면 `README.md`와 `web/ERD.md`를 함께 참고하세요. 새로운 카테고리·이벤트를 추가할 때는 FastAPI의 `COURSE_CATALOG`, 프론트엔드 타입 정의, Spark ETL 로직을 동시에 업데이트해야 일관성을 유지할 수 있습니다.
+    # df를 'events_delta' 라는 이름의 임시 테이블로 등록
+    df.createOrReplaceTempView("events_delta")
+    ```
+3.  이제 `%sql` 인터프리터를 사용하여 등록된 `events_delta` 테이블을 자유롭게 쿼리할 수 있습니다.
+    ```sql
+    %sql
+    SELECT type, count(1) AS cnt
+    FROM events_delta
+    GROUP BY type
+    ORDER BY cnt DESC
+    LIMIT 10
+    ```
+4.  쿼리 실행 후, 결과 테이블 하단의 차트 버튼을 눌러 원하는 형태로 시각화합니다.

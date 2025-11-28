@@ -27,12 +27,8 @@ MINIO_BUCKET = os.getenv('MINIO_BUCKET', 'logs')
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
-FRONTEND_CANDIDATES = [
-    PROJECT_ROOT / 'growit' / 'dist',
-    PROJECT_ROOT / 'growit' / 'growit' / 'dist',
-    PROJECT_ROOT / 'growit' / 'green-learning-hub-main' / 'dist',
-]
-FRONTEND_DIST = next((candidate for candidate in FRONTEND_CANDIDATES if candidate.exists()), None)
+CANDIDATE_FRONTEND_DIST = PROJECT_ROOT / 'growit' / 'dist'
+FRONTEND_DIST = CANDIDATE_FRONTEND_DIST if CANDIDATE_FRONTEND_DIST.exists() else None
 FRONTEND_ASSETS = FRONTEND_DIST / 'assets' if FRONTEND_DIST and (FRONTEND_DIST / 'assets').exists() else None
 
 app = FastAPI()
