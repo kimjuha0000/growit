@@ -14,6 +14,7 @@ import Auth from "./pages/Auth";
 import Categories from "./pages/Categories";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/hooks/use-auth";
+import GlobalAnalytics from "@/components/GlobalAnalytics";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <GlobalAnalytics />
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/courses" element={<Courses />} />

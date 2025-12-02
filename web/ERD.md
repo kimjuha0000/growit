@@ -1,70 +1,97 @@
-# Learning Pipeline ERD
+# GrowIt Pipeline ERD
 
-아래 ERD는 웹 앱이 다루는 핵심 레코드(사용자, 카테고리, 강의, 이벤트)를 정리한 것입니다.
+모든 페이지/컴포넌트의 클릭·입력·페이지 진입 이벤트가 `/api/events`로 수집되고, Bronze(JSONL) → Delta → Postgres 마트로 흘러가는 경로를 정리했습니다.
 
 ```mermaid
 erDiagram
-    USERS ||--o{ EVENTS : generates
-    USERS ||--o{ RECOMMENDATION_REQUESTS : submits
-    CATEGORIES ||--o{ COURSES : contains
-    CATEGORIES ||--o{ RECOMMENDATION_REQUESTS : filters
-    RECOMMENDATION_REQUESTS ||--o{ EVENTS : trackedAs
-    EVENTS ||--|| BRONZE_FILES : storedIn
+    USERS ||--o{ UI_EVENTS : performs
+    UI_EVENTS ||--o{ BRONZE_LOGS : appendedTo
+    BRONZE_LOGS ||--o{ DELTA_EVENTS : refinedInto
+    DELTA_EVENTS ||--o{ MART_EVENTS : publishedTo
+    MART_EVENTS ||--o{ MART_DAILY_EVENTS : aggregatedInto
+    BRONZE_LOGS ||--o{ MINIO_OBJECTS : mirroredAs
+    CATEGORIES ||--o{ RECOMMENDATIONS : requestedFor
 
     USERS {
         string username PK
-        string password
         string full_name
+        string password
         string[] interests
+    }
+
+    UI_EVENTS {
+        string id PK
+        string type          // page_view, ui_click, ui_change, search_query, video_open 등
+        datetime ts
+        string username FK
+        json props           // path, tag, track_name, metadata
+    }
+
+    BRONZE_LOGS {
+        string path PK       // /data/bronze/app/YYYY/MM/DD/part-*.jsonl
+        date event_date
+    }
+
+    DELTA_EVENTS {
+        string id PK
+        date event_date
+        string username FK
+        json props
+        string source_file
+    }
+
+    MART_EVENTS {
+        string id PK
+        timestamp ts
+        string username FK
+        json props
+    }
+
+    MART_DAILY_EVENTS {
+        date event_date PK
+        string user_id PK
+        bigint cnt
+    }
+
+    MINIO_OBJECTS {
+        string bucket PK
+        string object_key
+        datetime uploaded_at
     }
 
     CATEGORIES {
         string id PK
         string name
-        string description
-        string icon
         string accent
     }
 
-    COURSES {
-        string id PK
-        string category_id FK
-        string title
-        string provider
-        string duration
-        string level
-        string url
-    }
-
-    RECOMMENDATION_REQUESTS {
+    RECOMMENDATIONS {
         string id PK
         string username FK
         string category_id FK
         datetime requested_at
     }
-
-    EVENTS {
-        string id PK
-        string type
-        datetime ts
-        string username FK
-        json props
-    }
-
-    BRONZE_FILES {
-        string path PK
-        datetime hour_bucket
-        boolean uploaded_to_minio
-    }
 ```
 
-## 테이블 설명
+## 흐름 요약
+- **UI_EVENTS**: 전역 클릭(`ui_click`), 입력(`ui_change`), 페이지뷰(`page_view`), 검색/카테고리/영상 관련 이벤트가 모두 FastAPI로 전달됩니다.
+- **BRONZE_LOGS**: FastAPI가 `/data/bronze/app/YYYY/MM/DD/part-*.jsonl`에 append, `USE_MINIO=true`일 때 동일 파일을 MinIO `logs` 버킷으로 업로드.
+- **DELTA_EVENTS**: Spark ETL(`spark/app/job_etl.py`)이 Bronze를 Delta로 정제하면서 파티션(`event_date`)을 만듭니다.
+- **MART_EVENTS / MART_DAILY_EVENTS**: 같은 ETL이 Postgres에 상세(`mart.events`)와 일자·사용자 집계(`mart.daily_events`)를 적재합니다.
+- **CATEGORIES / RECOMMENDATIONS**: 추천 요청(`/api/recommendations`) 흐름을 개념적으로 표현했습니다. 요청도 이벤트(`category_recommendation`)로 기록됩니다.
 
-- **USERS**: `users.json`에서 로드되는 계정 정보. 로그인 시 검증되고 관심사를 `props`로 기록합니다.
-- **CATEGORIES**: FastAPI가 제공하는 10개 트랙 메타데이터(아이콘, 강조 컬러 포함).
-- **COURSES**: 각 카테고리당 100개의 가상 강의 URL을 가진 항목. UI 카드에서 바로가기 링크를 노출합니다.
-- **RECOMMENDATION_REQUESTS**: 사용자가 선택한 카테고리 요청을 개념적으로 캡처한 뷰로, API 페이로드와 동일한 구조입니다.
-- **EVENTS**: 로그인/추천 액션을 JSONL로 남기는 로그. 사용자, 이벤트 유형, 요청 메타데이터를 모두 저장합니다.
-- **BRONZE_FILES**: `/data/bronze/app/YYYY/MM/DD/part-*.jsonl` 경로에 쌓이는 파일과 선택적으로 MinIO에 업로드되는 위치를 추상화했습니다.
+## 빠른 검증 쿼리
+```sql
+-- 일자별 이벤트 건수
+SELECT event_date, SUM(cnt) AS total_events
+FROM mart.daily_events
+GROUP BY event_date
+ORDER BY event_date DESC;
 
-이 모델을 기준으로 Delta Lake나 Postgres에 적재하면 사용자별 행동 히스토리와 카테고리별 강의 소비 현황을 쉽게 분석할 수 있습니다.
+-- 특정 유저의 최신 이벤트 20건
+SELECT ts, type, props
+FROM mart.events
+WHERE username = 'datafan'
+ORDER BY ts DESC
+LIMIT 20;
+```
