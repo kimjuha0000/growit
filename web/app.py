@@ -489,17 +489,33 @@ def get_pipeline_stats():
         print(f"Could not read raw data stats: {e}")
 
 
-    # 2. Processed data stats
+    # 2. Processed data stats (mart.events 기준)
     processed_rows = 0
+    latest_ts = None
+    distinct_users = 0
+    distinct_days = 0
     conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
             # Check if table exists first
-            cur.execute("SELECT to_regclass('mart.daily_events')")
+            cur.execute("SELECT to_regclass('mart.events')")
             if cur.fetchone()[0]:
-                cur.execute('SELECT COUNT(*) FROM mart.daily_events')
-                processed_rows = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS row_count,
+                        MAX(ts) AS latest_ts,
+                        COUNT(DISTINCT username) AS distinct_users,
+                        COUNT(DISTINCT event_date) AS distinct_days
+                    FROM mart.events
+                    """
+                )
+                row = cur.fetchone()
+                processed_rows = row[0] or 0
+                latest_ts = row[1].isoformat() if row[1] else None
+                distinct_users = row[2] or 0
+                distinct_days = row[3] or 0
     except Exception as e:
         print(f"Could not read processed data stats: {e}")
     finally:
@@ -508,7 +524,12 @@ def get_pipeline_stats():
 
     return {
         'raw_data': {'file_count': raw_files, 'line_count': raw_lines, 'recent_files': recent_files},
-        'processed_data': {'row_count': processed_rows},
+        'processed_data': {
+            'row_count': processed_rows,
+            'latest_ts': latest_ts,
+            'distinct_users': distinct_users,
+            'distinct_days': distinct_days,
+        },
         'last_updated': datetime.now(timezone.utc).isoformat()
     }
 

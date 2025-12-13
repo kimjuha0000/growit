@@ -75,7 +75,7 @@ const PipelineChart = ({ data }: { data: any[] }) => (
 );
 
 const RawDataSample = () => {
-    const { data, isLoading, error } = useQuery({
+    const { data, isLoading, error, refetch, isRefetching } = useQuery({
         queryKey: ['raw-data-sample'],
         queryFn: fetchRawDataSample,
         refetchInterval: 5000,
@@ -89,6 +89,11 @@ const RawDataSample = () => {
             <CardHeader>
                 <CardTitle>원본 로그 샘플</CardTitle>
                 <CardDescription>최신 행 (파일: <Badge variant="outline">{data?.file}</Badge>)</CardDescription>
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isRefetching}>
+                        {isRefetching ? '새로고침 중...' : '샘플 새로고침'}
+                    </Button>
+                </div>
             </CardHeader>
             <CardContent>
                 <div className="p-4 bg-gray-900 text-white rounded-md text-xs font-mono max-h-60 overflow-y-auto">
@@ -169,7 +174,7 @@ const QueryInterface = () => {
 }
 
 export default function AdminPage() {
-    const { data: statsData, isLoading, error } = useQuery({
+    const { data: statsData, isLoading, error, refetch: refetchStats, isRefetching } = useQuery({
         queryKey: ['stats'],
         queryFn: fetchStats,
         refetchInterval: 5000,
@@ -177,7 +182,7 @@ export default function AdminPage() {
 
     const chartData = [
         { name: '원본 로그 라인 수', count: statsData?.raw_data?.line_count || 0 },
-        { name: '정제 이벤트 행 수', count: statsData?.processed_data?.row_count || 0 },
+        { name: '정제 이벤트 행 수 (mart.events)', count: statsData?.processed_data?.row_count || 0 },
     ];
     
     if (isLoading) return <div>대시보드 불러오는 중...</div>;
@@ -185,7 +190,14 @@ export default function AdminPage() {
 
     return (
         <div className="container mx-auto p-4 space-y-6">
-            <h1 className="text-3xl font-bold">파이프라인 관리자 대시보드</h1>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h1 className="text-3xl font-bold">파이프라인 관리자 대시보드</h1>
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => refetchStats()} disabled={isRefetching}>
+                        {isRefetching ? '새로고침 중...' : '강제 새로고침'}
+                    </Button>
+                </div>
+            </div>
             
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <StatsCard 
@@ -201,12 +213,27 @@ export default function AdminPage() {
                 <StatsCard 
                     title="정제된 행 수" 
                     value={statsData?.processed_data?.row_count || 0}
-                    description="mart.daily_events 테이블 행 수"
+                    description="mart.events 테이블 행 수"
                 />
                  <StatsCard 
                     title="마지막 갱신 시각" 
                     value={new Date(statsData?.last_updated).toLocaleTimeString()}
                     description="통계 갱신 시간"
+                />
+                <StatsCard 
+                    title="최근 이벤트 시각" 
+                    value={statsData?.processed_data?.latest_ts ? new Date(statsData.processed_data.latest_ts).toLocaleTimeString() : '-'}
+                    description="mart.events 기준 최신 ts"
+                />
+                <StatsCard 
+                    title="고유 사용자 수" 
+                    value={statsData?.processed_data?.distinct_users || 0}
+                    description="mart.events 기준 username 유니크"
+                />
+                <StatsCard 
+                    title="이벤트 발생 일수" 
+                    value={statsData?.processed_data?.distinct_days || 0}
+                    description="mart.events 기준 event_date 유니크"
                 />
             </div>
 
