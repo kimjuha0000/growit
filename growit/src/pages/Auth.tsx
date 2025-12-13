@@ -103,13 +103,6 @@ const Auth = () => {
                     />
                   </div>
 
-                  <div className="rounded-xl bg-muted/30 p-3 text-sm text-muted-foreground space-y-1">
-                    <p className="font-medium text-foreground">샘플 계정</p>
-                    <p>datafan / pass1234</p>
-                    <p>growthhacker / grow2025</p>
-                    <p>juniordev / devstart</p>
-                  </div>
-
                   <Button type="submit" className="w-full" size="lg" disabled={loginMutation.isLoading}>
                     {loginMutation.isLoading ? "로그인 중..." : "로그인"}
                   </Button>

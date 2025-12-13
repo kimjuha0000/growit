@@ -49,6 +49,9 @@ const Navbar = () => {
           <Link to="/my-page" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
             마이페이지
           </Link>
+          <Link to="/admin" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
+            Admin
+          </Link>
           {user && (
             <span className="text-sm font-medium text-foreground/70">
               {user.full_name}님
@@ -94,6 +97,7 @@ const Navbar = () => {
               <Link to="/courses" className="text-sm font-medium">강의</Link>
               <Link to="/categories" className="text-sm font-medium">카테고리</Link>
               <Link to="/my-page" className="text-sm font-medium">마이페이지</Link>
+              <Link to="/admin" className="text-sm font-medium">Admin</Link>
               {user ? (
                 <div className="space-y-3 pt-4">
                   <p className="text-sm text-muted-foreground">{user.full_name}님</p>

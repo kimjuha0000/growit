@@ -441,6 +441,126 @@ def _serve_frontend_asset(path: str) -> FileResponse | None:
     return None
 
 
+# --- Admin Dashboard API ---
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+# Database connection details from environment variables
+DB_HOST = os.getenv('POSTGRES_HOST', 'postgres')
+DB_PORT = os.getenv('POSTGRES_PORT', '5432')
+DB_NAME = os.getenv('POSTGRES_DB', 'dwh')
+DB_USER = os.getenv('POSTGRES_USER', 'analytics')
+DB_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'devpass')
+
+def get_db_connection():
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
+        return conn
+    except psycopg2.OperationalError as e:
+        print(f"Error connecting to database: {e}")
+        raise HTTPException(status_code=500, detail=f"Database connection error: {e}")
+
+
+admin_router = APIRouter(prefix='/api/admin')
+
+@admin_router.get('/stats')
+def get_pipeline_stats():
+    # 1. Raw data stats
+    raw_files = 0
+    raw_lines = 0
+    recent_files = []
+    try:
+        for root, _, files in os.walk(BRONZE_ROOT):
+            for file in files:
+                if file.endswith('.jsonl'):
+                    raw_files += 1
+                    full_path = Path(root) / file
+                    if len(recent_files) < 5:
+                         recent_files.append(str(full_path.relative_to(BRONZE_ROOT)))
+                    with full_path.open('r', encoding='utf-8') as f:
+                        raw_lines += sum(1 for _ in f)
+    except Exception as e:
+        print(f"Could not read raw data stats: {e}")
+
+
+    # 2. Processed data stats
+    processed_rows = 0
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            # Check if table exists first
+            cur.execute("SELECT to_regclass('mart.daily_events')")
+            if cur.fetchone()[0]:
+                cur.execute('SELECT COUNT(*) FROM mart.daily_events')
+                processed_rows = cur.fetchone()[0]
+    except Exception as e:
+        print(f"Could not read processed data stats: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    return {
+        'raw_data': {'file_count': raw_files, 'line_count': raw_lines, 'recent_files': recent_files},
+        'processed_data': {'row_count': processed_rows},
+        'last_updated': datetime.now(timezone.utc).isoformat()
+    }
+
+
+@admin_router.get('/raw-data-sample')
+def get_raw_data_sample(lines: int = 10):
+    try:
+        all_files = [p for p in BRONZE_ROOT.rglob('*.jsonl')]
+        if not all_files:
+            return {'lines': ['No raw data found.']}
+        
+        latest_file = max(all_files, key=lambda p: p.stat().st_mtime)
+        
+        with latest_file.open('r', encoding='utf-8') as f:
+            content = f.readlines()
+        
+        return {
+            'file': str(latest_file.relative_to(BRONZE_ROOT)),
+            'lines': [line.strip() for line in content[-lines:]]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read raw data sample: {e}")
+
+
+class QueryRequest(BaseModel):
+    sql: str
+
+@admin_router.post('/query')
+def execute_sql_query(payload: QueryRequest):
+    query = payload.sql.strip()
+    if not query.lower().startswith('select'):
+        raise HTTPException(status_code=400, detail="Only SELECT queries are allowed.")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query)
+            columns = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
+        return {'columns': columns, 'rows': rows}
+    except Exception as e:
+        # Be careful with exposing raw DB errors
+        error_message = str(e).split('\n')[0] 
+        raise HTTPException(status_code=400, detail=f"Query failed: {error_message}")
+    finally:
+        if conn:
+            conn.close()
+
+# --- End Admin Dashboard API ---
+
+
 api_router = APIRouter(prefix='/api')
 
 
@@ -521,6 +641,7 @@ async def record_event(payload: CustomEventRequest, req: Request):
     return {'ok': True}
 
 
+app.include_router(admin_router)
 app.include_router(api_router)
 
 

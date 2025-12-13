@@ -12,9 +12,11 @@ import Search from "./pages/Search";
 import Cart from "./pages/Cart";
 import Auth from "./pages/Auth";
 import Categories from "./pages/Categories";
+import AdminPage from "./pages/AdminPage";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/hooks/use-auth";
 import GlobalAnalytics from "@/components/GlobalAnalytics";
+import RequireAuth from "@/components/RequireAuth";
 
 const queryClient = new QueryClient();
 
@@ -27,17 +29,88 @@ const App = () => (
         <BrowserRouter>
           <GlobalAnalytics />
           <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/courses" element={<Courses />} />
-            <Route path="/course/:id" element={<CourseDetail />} />
-            <Route path="/player" element={<Player />} />
-            <Route path="/my-page" element={<MyPage />} />
-            <Route path="/search" element={<Search />} />
-            <Route path="/cart" element={<Cart />} />
+            <Route
+              path="/"
+              element={
+                <RequireAuth>
+                  <Index />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/courses"
+              element={
+                <RequireAuth>
+                  <Courses />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/course/:id"
+              element={
+                <RequireAuth>
+                  <CourseDetail />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/player"
+              element={
+                <RequireAuth>
+                  <Player />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/my-page"
+              element={
+                <RequireAuth>
+                  <MyPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/search"
+              element={
+                <RequireAuth>
+                  <Search />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/cart"
+              element={
+                <RequireAuth>
+                  <Cart />
+                </RequireAuth>
+              }
+            />
             <Route path="/auth" element={<Auth />} />
-            <Route path="/categories" element={<Categories />} />
+            <Route
+              path="/categories"
+              element={
+                <RequireAuth>
+                  <Categories />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <RequireAuth>
+                  <AdminPage />
+                </RequireAuth>
+              }
+            />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
+            <Route
+              path="*"
+              element={
+                <RequireAuth>
+                  <NotFound />
+                </RequireAuth>
+              }
+            />
           </Routes>
         </BrowserRouter>
       </TooltipProvider>

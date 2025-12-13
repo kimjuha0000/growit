@@ -8,7 +8,7 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
 | --- | --- | --- |
 | 프론트엔드 | React 18, Vite, TypeScript, shadcn/ui | `growit/` 폴더. `npm run build`로 만든 `dist/`를 FastAPI가 서빙합니다. |
 | 웹/API | FastAPI (`web/app.py`) | `/api/login`, `/api/categories`, `/api/recommendations` + `/api/events` 로깅 제공. `/traffic` 페이지 + `/api/traffic/trigger`로 버튼 한 번에 대량 트래픽을 발생시킬 수 있습니다. |
-| 워크플로 | Airflow (`airflow/`) | 브론즈(JSONL) 데이터를 주기적으로 Spark 작업으로 넘겨줍니다. |
+| 워크플로 | Airflow (`airflow/`) | 브론즈(JSONL) 데이터를 주기적으로 Spark 작업으로 넘겨줍니다. `synthetic_events` DAG가 50명 가상 사용자 로그를 30분마다 생성합니다. |
 | 처리 | Spark + Delta (`spark/app/job_etl.py`) | `/data/bronze/app`을 읽어 Delta/Parquet 레이어와 Postgres 마트로 적재합니다. |
 | 저장소 | Postgres, MinIO, Delta Lake | Zeppelin이나 외부 BI 도구에서 조회할 수 있는 최종 지표를 제공합니다. |
 
@@ -98,5 +98,10 @@ GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리�
 
 - [`PROJECT_MANUAL.md`](./PROJECT_MANUAL.md) : 서비스별 세부 설정, 파이프라인 흐름, 트러블슈팅을 모두 모아둔 설명서입니다.
 - [`web/ERD.md`](./web/ERD.md) : 엔터티 관계(ERD) 문서.
+
+## 샘플 계정 (로그인 페이지에는 표시하지 않음)
+- datafan / pass1234
+- growthhacker / grow2025
+- juniordev / devstart
 
 프론트엔드 수정 후에는 항상 `npm run build`를 다시 실행해 FastAPI가 최신 정적 파일을 제공하도록 해주세요. 도커 환경을 전체적으로 재시작하고 싶다면 `docker compose down && docker compose up -d --build`를 사용하면 됩니다. 문제가 생기면 도커 로그(`docker compose logs <서비스>`), FastAPI 로그, 브라우저 네트워크 탭, Airflow Task 로그를 순서대로 확인하면 대부분 원인을 찾을 수 있습니다.

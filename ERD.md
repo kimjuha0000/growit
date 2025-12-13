@@ -94,40 +94,74 @@ erDiagram
 
 ## 주요 쿼리 예시
 
-`mart.daily_events`는 Spark ETL이 최종적으로 적재하는 Postgres 마트 테이블입니다. 아래 SQL을 통해 가장 흔하게 확인하는 지표를 바로 조회할 수 있습니다.
+Spark ETL은 `mart.events`(상세)와 `mart.daily_events`(일별 요약)를 Postgres에 적재합니다. 아래 SQL로 운영/분석을 빠르게 확인할 수 있습니다.
 
 ```sql
--- 1) 최근 7일 일자별 총 이벤트 수
-SELECT event_date, SUM(cnt) AS total_events
-FROM mart.daily_events
+-- (운영 체크) 최신 이벤트가 잘 쌓였는지
+SELECT COUNT(*) AS rows, MAX(ts) AS latest_ts, MAX(event_date) AS latest_date
+FROM mart.events;
+
+-- (최근 7일) 일자별 총 이벤트 수
+SELECT event_date, COUNT(*) AS total_events
+FROM mart.events
 WHERE event_date >= CURRENT_DATE - INTERVAL '7 days'
 GROUP BY event_date
 ORDER BY event_date;
 
--- 2) 최근 30일 동안 이벤트가 많은 상위 5명의 사용자
-SELECT user_id, SUM(cnt) AS events_last_30d
-FROM mart.daily_events
+-- (상위 유저) 최근 30일 이벤트가 많은 사용자
+SELECT username, COUNT(*) AS events_last_30d
+FROM mart.events
 WHERE event_date >= CURRENT_DATE - INTERVAL '30 days'
-GROUP BY user_id
+GROUP BY username
 ORDER BY events_last_30d DESC
-LIMIT 5;
+LIMIT 10;
 
--- 3) Delta 로그를 조인해 카테고리 정보까지 한 번에 보는 예시
--- (Zeppelin이나 Spark SQL에서 실행하면 편리합니다.)
-SELECT d.event_date,
-       d.user_id,
-       d.cnt,
-       b.props ->> 'category' AS category_slug
-FROM mart.daily_events d
-LEFT JOIN delta.`/data/delta/events` b
-  ON d.user_id = b.user_id
- AND DATE(b.ts) = d.event_date
-WHERE d.event_date = CURRENT_DATE - INTERVAL '1 day'
-ORDER BY d.cnt DESC;
+-- (퍼널 예시) 추천 버튼 클릭 → 실제 추천 결과 확인 흐름
+WITH click AS (
+  SELECT username, ts
+  FROM mart.events
+  WHERE type = 'category_recommendation'
+),
+view AS (
+  SELECT username, ts
+  FROM mart.events
+  WHERE type = 'ui_click' AND props ->> 'path' = '/admin'
+)
+SELECT COUNT(*)                            AS clicks,
+       COUNT(view.username)                AS admin_views,
+       100.0 * COUNT(view.username) / NULLIF(COUNT(*),0) AS view_rate_pct
+FROM click
+LEFT JOIN view
+  ON click.username = view.username
+ AND view.ts BETWEEN click.ts AND click.ts + INTERVAL '10 minutes';
+
+-- (Delta 직접) 최신 20건 RAW 확인
+SELECT * FROM delta.`/data/delta/events`
+ORDER BY ts DESC LIMIT 20;
+
+-- (카테고리 TOP) 추천 요청에서 가장 많이 선택한 카테고리
+SELECT props ->> 'categoryId' AS category_id,
+       COUNT(*) AS cnt
+FROM mart.events
+WHERE type = 'category_recommendation'
+GROUP BY category_id
+ORDER BY cnt DESC
+LIMIT 10;
+
+-- (UI 컴포넌트 TOP) 클릭 로그 기준 가장 많이 눌린 경로/컴포넌트
+SELECT COALESCE(props ->> 'path', props ->> 'tag', 'unknown') AS component,
+       COUNT(*) AS clicks
+FROM mart.events
+WHERE type = 'ui_click'
+GROUP BY component
+ORDER BY clicks DESC
+LIMIT 10;
 ```
 
-- **1번 쿼리**: 매일 이벤트 적재가 정상인지 빠르게 체크할 때 사용합니다.
-- **2번 쿼리**: 이벤트가 많은 파워 유저를 찾거나 사용자 샘플을 뽑을 때 유용합니다.
-- **3번 쿼리**: Delta 로그(`b.props`)에 포함된 카테고리·추가 속성을 함께 조회해 분석 범위를 확장합니다.
+- 운영 체크: 최신 `ts`, `event_date`가 갱신되는지.
+- 활동 상위 유저: 최근 30일 집계.
+- 퍼널: 추천 버튼 → Admin 화면 확인률.
+- 카테고리/컴포넌트 TOP: `category_recommendation`, `ui_click` 이벤트 속성에서 집계.
+- Delta RAW: `/data/delta/events`를 직접 확인해 스키마/값을 검증.
 
 필요에 따라 `mart.daily_events`를 BI 도구나 노트북에 연결하면 사용자·카테고리·일자 단위 대시보드를 쉽게 만들 수 있습니다.

@@ -25,8 +25,13 @@ MINIO_ACCESS = os.getenv("MINIO_ACCESS_KEY", "admin")
 MINIO_SECRET = os.getenv("MINIO_SECRET_KEY", "admin12345")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "logs")
 
-# 기본은 로컬 공유 볼륨을 읽고, 필요하면 BRONZE_BASE를 s3a://… 형태로 덮어써 MinIO를 직접 읽을 수 있습니다.
+# 기본은 로컬 공유 볼륨을 읽고, 필요하면 BRONZE_BASE(S) 를 s3a://… 형태로 덮어써 MinIO를 직접 읽을 수 있습니다.
+DEFAULT_BRONZE = "/data/bronze/app/,/opt/airflow/data/bronze/app"
 BRONZE_BASE = os.getenv("BRONZE_BASE", "/data/bronze/app/")
+# 쉼표 구분 복수 입력 지원: "/data/bronze/app,/opt/airflow/data/bronze/app"
+BRONZE_BASES = [
+    p.strip().rstrip("/") for p in os.getenv("BRONZE_BASES", DEFAULT_BRONZE).split(",") if p.strip()
+]
 DELTA_OUT = os.getenv("DELTA_EVENTS_PATH", "/data/delta/events")
 PG_TABLE = os.getenv("PG_EVENTS_TABLE", "mart.events")
 
@@ -66,7 +71,21 @@ spark = (
 # =========================
 # 1) Read Bronze(JSONL) & Transform (event-level, ERD 맞춤)
 # =========================
-df = spark.read.option("recursiveFileLookup", "true").json(BRONZE_BASE)
+dfs = []
+for base in BRONZE_BASES:
+    if not base:
+        continue
+    try:
+        df_part = spark.read.option("recursiveFileLookup", "true").json(base)
+        dfs.append(df_part)
+    except Exception:
+        # 읽을 수 없는 경로는 건너뜀
+        pass
+
+if not dfs:
+    raise RuntimeError(f"No readable bronze paths. Checked: {BRONZE_BASES}")
+
+df = dfs[0] if len(dfs) == 1 else dfs[0].unionByName(*dfs[1:], allowMissingColumns=True)
 
 df2 = (
     df
@@ -107,8 +126,12 @@ df2 = (
 dates = [r[0] for r in df2.select("event_date").distinct().collect()]  # list[datetime.date]
 
 if dates:
+    # JDBC 드라이버를 확실히 로드(스탠드얼론 클러스터에서도 경로 보장)
+    pg_driver_jar = "/tmp/.ivy2/jars/org.postgresql_postgresql-42.7.4.jar"
+    if os.path.exists(pg_driver_jar):
+        spark.sparkContext._jsc.addJar(pg_driver_jar)
+
     jvm = spark._jvm
-    # 드라이버 로드
     jvm.java.lang.Class.forName("org.postgresql.Driver")
     # 접속 프로퍼티
     props = jvm.java.util.Properties()

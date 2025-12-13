@@ -39,7 +39,9 @@ services:
       - "18181:8080"   # Spark Master UI
     volumes:
       - "./data:/data"
+      - delta_data:/data/delta
       - "./spark/app:/opt/spark/app"
+      - bronze_data:/data/bronze
     restart: unless-stopped
 
   # Spark Worker
@@ -53,6 +55,8 @@ services:
     # (worker UI 포트는 호스트에 굳이 노출하지 않음)
     volumes:
       - "./data:/data"
+      - delta_data:/data/delta
+      - bronze_data:/data/bronze
     restart: unless-stopped
 
   zeppelin:
@@ -70,15 +74,32 @@ services:
     build:
       context: ./airflow
       dockerfile: Dockerfile   # ← 새 Dockerfile 사용
-    user: "50000:0"
+    user: "0"  # root로 시작해 퍼미션 정리 후 airflow 유저로 전환
     environment:
       AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      # SequentialExecutor가 내부에서 `airflow tasks run ...`을 호출할 때
+      # /home/airflow/.local/bin이 PATH에 없으면 binary를 못 찾아서 실패하므로 직접 추가
+      PATH: "/home/airflow/.local/bin:/opt/spark/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
       TZ: Asia/Seoul
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}
       # (이미지에서 pip 설치했으므로 굳이 _PIP_ADDITIONAL_REQUIREMENTS는 없어도 됨)
-    command: >
-      bash -lc "airflow db init &&
-      airflow users create --username admin --firstname a --lastname a --role Admin --email a@a.com --password admin || true &&
-      airflow webserver & airflow scheduler"
+    command: |
+      bash -lc "
+      set -e
+      export PATH=/home/airflow/.local/bin:/opt/spark/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      mkdir -p /data/bronze/app
+      chown -R airflow:root /data/bronze
+      mkdir -p /data/delta
+      chown -R airflow:root /data/delta
+      chmod -R 777 /data/delta
+      mkdir -p /opt/airflow/logs/webserver
+      chown -R airflow:root /opt/airflow
+      su -s /bin/bash airflow -c '/home/airflow/.local/bin/airflow db init'
+      su -s /bin/bash airflow -c '/home/airflow/.local/bin/airflow users create --username admin --firstname a --lastname a --role Admin --email a@a.com --password admin' || true
+      su -s /bin/bash airflow -c '/home/airflow/.local/bin/airflow webserver --port 8080 --pid /opt/airflow/airflow-webserver.pid --daemon --stdout /opt/airflow/logs/webserver/stdout.log --stderr /opt/airflow/logs/webserver/stderr.log'
+      exec su -s /bin/bash airflow -c '/home/airflow/.local/bin/airflow scheduler'
+      "
     ports:
       - "8282:8080"
     depends_on:
@@ -89,6 +110,8 @@ services:
       - "./airflow/dags:/opt/airflow/dags"
       - "./spark/app:/opt/spark/app"   # ← DAG에서 이 경로 사용
       - "./data:/data"
+      - delta_data:/data/delta
+      - bronze_data:/data/bronze
     restart: unless-stopped
 
 
@@ -96,6 +119,7 @@ services:
     build: ./web
     ports:
       - "3300:3000"
+    user: "50000"
     environment:
       DATA_ROOT: ${DATA_ROOT}
       USE_MINIO: ${USE_MINIO}
@@ -103,13 +127,22 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
       
     volumes:
       - "./data:/data"
       - "./growit/dist:/growit/dist:ro"
+      - bronze_data:/data/bronze
+      - delta_data:/data/delta
     depends_on:
       - minio
 
 volumes:
   minio_data: {}
   pg_data_growit: {}
+  bronze_data: {}
+  delta_data: {}

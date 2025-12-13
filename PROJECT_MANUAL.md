@@ -88,7 +88,7 @@ Spark Job (spark/app/job_etl.py) → Delta Lake (/data/delta/…)
 
 ### Airflow
 - 위치: `airflow/`. DAG 예시는 `logs_etl`.
-- UI: `http://localhost:8082` (기본 `admin/admin`).
+- UI: `http://localhost:8282` (기본 `admin/admin`).
 - DAG는 `/data/bronze/app`을 파싱해 Spark 작업을 실행하고 Delta + Postgres에 적재합니다.
 
 ### Spark & Delta
@@ -130,6 +130,25 @@ Spark Job (spark/app/job_etl.py) → Delta Lake (/data/delta/…)
   SELECT * FROM delta.`/data/delta/events` ORDER BY event_date DESC LIMIT 20;
   ```
 
+### 현재 ETL 상태 확인(운영 체크)
+- Spark ETL(`spark/app/job_etl.py`)은 Bronze JSONL을 읽어 Delta(`/data/delta/events`)에 append, 이어서 Postgres `mart.events`/`mart.daily_events`에 적재합니다.
+- Docker 컨테이너 기준:
+  - Airflow UI: `http://localhost:8282/health` 200 OK 확인
+  - Postgres: `mart.events` 최신 `event_date`는 2025-12-12, `ts`는 2025-12-11 16:05:45 UTC 기준까지 적재됨 (쿼리 예시는 아래).
+- 빠른 헬스체크 쿼리 (Postgres에서 실행):
+  ```sql
+  -- 최신 이벤트 유무
+  SELECT COUNT(*) AS rows, MAX(ts) AS latest_ts, MAX(event_date) AS latest_date
+  FROM mart.events;
+
+  -- 최근 7일 일자별 총 이벤트
+  SELECT event_date, COUNT(*) AS total_events
+  FROM mart.events
+  WHERE event_date >= CURRENT_DATE - INTERVAL '7 days'
+  GROUP BY event_date
+  ORDER BY event_date;
+  ```
+
 ## 서비스별 운영 팁
 
 | 서비스 | 자주 쓰는 명령/URL | 설명 |
@@ -154,6 +173,65 @@ Spark Job (spark/app/job_etl.py) → Delta Lake (/data/delta/…)
 7. **Zeppelin** 또는 `psql`에서 최신 지표를 조회.
 
 매 로그인/추천마다 JSONL 2건이 생기고, DAG가 실행되면 Delta 및 Postgres에도 신규 레코드가 추가됩니다.
+
+### 자주 쓰는 쿼리 (운영 + 퍼널 분석)
+Postgres `mart` 스키마 기준:
+```sql
+-- 1) 최신 이벤트 존재 여부
+SELECT COUNT(*) AS rows, MAX(ts) AS latest_ts, MAX(event_date) AS latest_date
+FROM mart.events;
+
+-- 2) 최근 30일 상위 유저
+SELECT username, COUNT(*) AS events_last_30d
+FROM mart.events
+WHERE event_date >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY username
+ORDER BY events_last_30d DESC
+LIMIT 10;
+
+-- 3) 퍼널: 추천 버튼 클릭 → Admin 화면 확인률
+WITH click AS (
+  SELECT username, ts
+  FROM mart.events
+  WHERE type = 'category_recommendation'
+),
+view AS (
+  SELECT username, ts
+  FROM mart.events
+  WHERE type = 'ui_click' AND props ->> 'path' = '/admin'
+)
+SELECT COUNT(*) AS clicks,
+       COUNT(view.username) AS admin_views,
+       100.0 * COUNT(view.username) / NULLIF(COUNT(*),0) AS view_rate_pct
+FROM click
+LEFT JOIN view
+  ON click.username = view.username
+ AND view.ts BETWEEN click.ts AND click.ts + INTERVAL '10 minutes';
+
+-- 4) 카테고리 TOP (추천 요청에서 어떤 카테고리가 많이 선택됐는지)
+SELECT props ->> 'categoryId' AS category_id,
+       COUNT(*) AS cnt
+FROM mart.events
+WHERE type = 'category_recommendation'
+GROUP BY category_id
+ORDER BY cnt DESC
+LIMIT 10;
+
+-- 5) UI 컴포넌트 TOP (클릭 로그 기준 많이 눌린 경로/컴포넌트)
+SELECT COALESCE(props ->> 'path', props ->> 'tag', 'unknown') AS component,
+       COUNT(*) AS clicks
+FROM mart.events
+WHERE type = 'ui_click'
+GROUP BY component
+ORDER BY clicks DESC
+LIMIT 10;
+```
+
+Delta RAW에서 직접 확인하고 싶을 때(Zeppelin/Spark SQL):
+```sql
+SELECT * FROM delta.`/data/delta/events`
+ORDER BY ts DESC LIMIT 20;
+```
 
 ## 트러블슈팅 요약
 

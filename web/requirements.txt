@@ -5,3 +5,4 @@ pendulum
 filelock
 boto3
 requests
+psycopg2-binary

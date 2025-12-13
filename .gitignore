@@ -1,0 +1,49 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Data files
+*.crc
+*.parquet
+
+# IDE
+.idea/
+.vscode/
+
+# Other
+data/
+tmp/
+airflow/logs
+postgres/data
+pg/data
+npm-cache/
+node_modules/
+package-lock.json
