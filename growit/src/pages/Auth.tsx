@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { trackEvent } from "@/lib/analytics";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -32,6 +33,7 @@ const Auth = () => {
       navigate("/categories");
     },
     onError: (err: Error) => {
+      trackEvent("login_fail", { username, message: err.message || "login failed" }, username);
       toast({
         title: "로그인 실패",
         description: err.message || "아이디/비밀번호를 확인해주세요.",

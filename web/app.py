@@ -600,7 +600,11 @@ def traffic_status():
 
 @api_router.post('/login')
 async def api_login(payload: LoginRequest, req: Request):
-    user = _verify_credentials(payload.username, payload.password)
+    try:
+        user = _verify_credentials(payload.username, payload.password)
+    except HTTPException as exc:
+        _log_event('login_fail', payload.username, {'reason': exc.detail}, req)
+        raise
     _log_event('login', user['username'], {'interests': user.get('interests', [])}, req)
     return {
         'ok': True,
@@ -629,30 +633,47 @@ def list_categories():
 
 @api_router.post('/recommendations')
 async def recommend(payload: RecommendationRequest, req: Request):
-    user = _get_user(payload.username)
-    if not user:
-        raise HTTPException(status_code=404, detail='사용자를 찾을 수 없습니다.')
-    if payload.category not in COURSE_CATALOG:
-        raise HTTPException(status_code=404, detail='카테고리를 찾을 수 없습니다.')
+    try:
+        user = _get_user(payload.username)
+        if not user:
+            raise HTTPException(status_code=404, detail='사용자를 찾을 수 없습니다.')
+        if payload.category not in COURSE_CATALOG:
+            raise HTTPException(status_code=404, detail='카테고리를 찾을 수 없습니다.')
 
-    category = COURSE_CATALOG[payload.category]
-    courses = category['courses']
-    _log_event(
-        'category_recommendation',
-        user['username'],
-        {'category': payload.category, 'course_count': len(courses)},
-        req,
-    )
-    return {
-        'category': {
-            'id': payload.category,
-            'name': category['name'],
-            'description': category.get('description'),
-            'icon': category.get('icon'),
-            'accent': category.get('accent'),
-        },
-        'courses': courses,
-    }
+        category = COURSE_CATALOG[payload.category]
+        courses = category['courses']
+        _log_event(
+            'category_recommendation',
+            user['username'],
+            {'category': payload.category, 'course_count': len(courses)},
+            req,
+        )
+        return {
+            'category': {
+                'id': payload.category,
+                'name': category['name'],
+                'description': category.get('description'),
+                'icon': category.get('icon'),
+                'accent': category.get('accent'),
+            },
+            'courses': courses,
+        }
+    except HTTPException as exc:
+        _log_event(
+            'recommendation_error',
+            payload.username,
+            {'category': payload.category, 'reason': exc.detail},
+            req,
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001 - 운영 관측용으로 에러 메시지를 그대로 남긴다
+        _log_event(
+            'recommendation_error',
+            payload.username,
+            {'category': payload.category, 'reason': str(exc)},
+            req,
+        )
+        raise
 
 
 @api_router.post('/events')

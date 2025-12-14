@@ -1,7 +1,23 @@
 import { Button } from "@/components/ui/button";
 import { ArrowRight, BookOpen, Users, Award } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { trackEvent } from "@/lib/analytics";
+import { useAuth } from "@/hooks/use-auth";
 
 const Hero = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
+
+  const handleCtaClick = (target: string, cta: "start_now" | "browse_courses") => {
+    trackEvent(
+      "cta_click",
+      { cta, path: location.pathname },
+      user?.username,
+    );
+    navigate(target);
+  };
+
   return (
     <section className="relative overflow-hidden bg-gradient-to-br from-primary/20 via-accent/10 to-background py-20">
       <div className="container px-4">
@@ -24,11 +40,19 @@ const Hero = () => {
             </p>
 
             <div className="flex flex-wrap gap-4">
-              <Button size="lg" className="gap-2">
+              <Button
+                size="lg"
+                className="gap-2"
+                onClick={() => handleCtaClick("/categories", "start_now")}
+              >
                 지금 시작하기
                 <ArrowRight className="h-4 w-4" />
               </Button>
-              <Button size="lg" variant="outline">
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => handleCtaClick("/search", "browse_courses")}
+              >
                 강의 둘러보기
               </Button>
             </div>

@@ -7,10 +7,13 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { PlayCircle, CheckCircle, Clock, MessageSquare, BookOpen, ChevronLeft } from "lucide-react";
 import { Link } from "react-router-dom";
+import { trackEvent } from "@/lib/analytics";
+import { useAuth } from "@/hooks/use-auth";
 
 const Player = () => {
   const [currentLesson, setCurrentLesson] = useState("1-1");
   const [note, setNote] = useState("");
+  const { user } = useAuth();
 
   const curriculum = [
     {
@@ -48,6 +51,27 @@ const Player = () => {
     0
   );
   const progress = (completedLessons / totalLessons) * 100;
+
+  const handleLessonClick = (sectionId: string, lesson: { id: string; completed: boolean }) => {
+    setCurrentLesson(lesson.id);
+    trackEvent(
+      "watch_progress",
+      {
+        lessonId: lesson.id,
+        sectionId,
+        completed: lesson.completed,
+        progress_pct: Math.round(progress),
+      },
+      user?.username,
+    );
+    if (lesson.completed) {
+      trackEvent(
+        "video_complete",
+        { lessonId: lesson.id, sectionId },
+        user?.username,
+      );
+    }
+  };
 
   return (
     <div className="flex h-screen flex-col">
@@ -93,7 +117,7 @@ const Player = () => {
                   {section.lessons.map((lesson) => (
                     <button
                       key={lesson.id}
-                      onClick={() => setCurrentLesson(lesson.id)}
+                      onClick={() => handleLessonClick(section.id, lesson)}
                       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                         currentLesson === lesson.id
                           ? "bg-primary text-primary-foreground"

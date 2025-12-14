@@ -7,21 +7,24 @@
 | event_type | 트리거 위치 | props 예시 |
 | --- | --- | --- |
 | login | `/api/login` 성공 시 백엔드에서 자동 기록 | `{ interests: string[] }` |
+| login_fail | `/api/login` 실패 시 프런트/백엔드에서 기록 | `{ username, message, reason? }` |
 | page_view | 라우트 진입/변경(전역 GlobalAnalytics) | `{ path, search? }` |
 | ui_click | 모든 클릭(전역, `data-track-name`으로 세분화 가능) | `{ path, tag, text?, track_name? }` |
 | ui_change | 인풋 변경(전역) | `{ path, field, tag, input_type }` |
 | home_category_click | 홈 화면 카테고리 카드 클릭 | `{ categoryId }` |
 | category_select | `/categories`에서 카드 선택 | `{ categoryId }` |
 | category_recommendation | ① `/api/recommendations` 요청을 FastAPI가 처리할 때 `{ category, course_count }` ② 추천 수신 후 UI에서 `{ categoryId, videoCount }` | 참고: 동일 type으로 두 경로에서 수집 |
+| recommendation_error | 추천 API 오류(존재하지 않는 사용자/카테고리, 기타 에러) | `{ category, reason }` |
 | video_open | 유튜브 카드 클릭(홈 인기, 카테고리 추천, 검색 결과) | `{ videoId, source, categoryId?, query? }` |
+| watch_progress | Player에서 레슨 선택 시 진행률 기록 | `{ lessonId, sectionId, completed, progress_pct }` |
+| video_complete | Player에서 완료된 레슨 선택 시 | `{ lessonId, sectionId }` |
 | search_query | 검색어 입력 후 600ms 유지 | `{ query }` |
 | search_keyword_click | 인기 검색어 배지 클릭 | `{ keyword }` |
+| cta_click | 랜딩 히어로 CTA 버튼 클릭 | `{ cta, path }` |
 
-- 추가로 넣으면 좋은 이벤트 아이디어
-  - `login_fail`/`auth_error`: 잘못된 자격 증명 시도 파악.
-  - `recommendation_error`: 추천 API 실패 원인 별 집계.
-  - `video_complete`/`watch_progress`: 학습 콘텐츠 실제 소비 여부 추적.
-  - `cta_click`: 배너, 상단 CTA 버튼 등 퍼널 진입점 클릭률 측정.
+- 추가 아이디어(향후)
+  - `note_save`: Player 메모 저장 시 학습 의도 추적.
+  - `question_post`: 질문 작성 시 커뮤니티 참여도 파악.
 
 GrowIt의 FastAPI, Airflow, Spark, Delta, Postgres, 그리고 MinIO를 아우르는 핵심 데이터 모델을 아래 ERD로 정리했습니다. 프런트엔드가 FastAPI에 남기는 이벤트가 어떤 형태로 저장되고 가공되는지 한눈에 파악할 수 있습니다.
 

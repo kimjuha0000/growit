@@ -121,6 +121,11 @@ const Categories = () => {
       });
     },
     onError: (err: Error) => {
+      trackEvent(
+        "recommendation_error",
+        { categoryId: selectedCategory, message: err.message },
+        user?.username,
+      );
       toast({
         title: "추천 요청 실패",
         description: err.message,
