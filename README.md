@@ -1,4 +1,4 @@
-# 러닝 파이프라인 허브 안내서
+# GROWIT
 
 GrowIt이라는 React/Vite 기반 프론트엔드와 FastAPI 백엔드, 그리고 Airflow → Spark/Delta → Postgres → Zeppelin으로 이어지는 데이터 파이프라인을 한 번에 체험할 수 있는 실습 환경입니다. 아래 내용을 순서대로 따라 하면 새로 합류한 팀원도 빠르게 전체 구조를 이해하고 실행해 볼 수 있습니다.
 
